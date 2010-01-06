@@ -1,0 +1,23 @@
+2010-01-05 18:21:59-0500
+------------------------
+
+msva is the Monkeysphere Validation Agent.
+
+Its goal is to simplify bindings between cryptographic tokens and the
+real-world entities that humans actually care about.
+
+In its current technical conception, is a minimal HTTP server that
+accepts two requests:
+
+POST /reviewcert (vars: UID, context, PKC)
+POST /extracerts (vars: certificates)
+
+(PKC means: public key carrier: raw key, OpenPGP cert, or X.509 cert)
+(UID means: User ID (like in OpenPGP))
+(context means: (this is too vague right now) something like "this certificate was used to try to identify an HTTPS server")
+
+
+
+Authors: Daniel Kahn Gillmor <dkg@fifthhorseman.net>
+         Matthew James Goins
+         Jameson Rollins
