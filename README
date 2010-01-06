@@ -12,10 +12,13 @@ accepts two requests:
 POST /reviewcert (vars: uid, context, pkc)
 POST /extracerts (vars: certificates)
 
+the variables that are posted are posted in a JSON string (*not* as www-form-encoded).
+
+the variables that are returned are application/json as well.
+
 (PKC means: public key carrier: raw key, OpenPGP cert, or X.509 cert)
 (UID means: User ID (like in OpenPGP))
 (context means: (this is too vague right now) something like "this certificate was used to try to identify an HTTPS server")
-
 
 
 Authors: Daniel Kahn Gillmor <dkg@fifthhorseman.net>
