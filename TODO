@@ -1,0 +1,4 @@
+- xul-ext:
+  - get PEM- or DER-encoded cert
+  - process response from agent
+  - convince brower to "ok" site on "ok" from agent
