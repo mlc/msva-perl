@@ -25,7 +25,9 @@ use strict;
     my $path = $cgi->path_info();
     my $handler = $dispatch{$path};
 
+    # FIXME: ensure that this is a POST
     if (ref($handler) eq "CODE") {
+      printf STDERR ("Got POST %s\n", $path);
       my ($status, $object) = $handler->($cgi);
       printf("HTTP/1.0 %s\r\nContent-Type: application/json\r\n\r\n%s", $status, to_json ($object));
 
@@ -38,6 +40,7 @@ use strict;
     my $cgi  = shift;   # CGI.pm object
     return if !ref $cgi;
 
+    # FIXME: these should be opening up a json blob instead of using CGI params.
     my $uid = $cgi->param('uid');
     my $pkc = $cgi->param('pkc');
     my $context = $cgi->param('context');
