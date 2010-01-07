@@ -1,4 +1,5 @@
 - xul-ext:
-  - get PEM- or DER-encoded cert
   - process response from agent
-  - convince brower to "ok" site on "ok" from agent
+  - make favicons state monkeysphere involvement
+  - fix status bar status dialog
+  - improve logging, with levels
