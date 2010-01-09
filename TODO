@@ -1,5 +1,8 @@
 - xul-ext:
   - process response from agent
-  - make favicons state monkeysphere involvement
+  - add information to favicon information
   - fix status bar status dialog
   - improve logging, with levels
+  - improve status bar icons
+  - give "monkeysphere" reason for cert validity in certificate view
+    dialog for site
