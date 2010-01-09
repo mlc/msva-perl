@@ -25,9 +25,10 @@ use strict;
     my $path = $cgi->path_info();
     my $handler = $dispatch{$path};
 
-    # FIXME: ensure that this is a POST
     if (ref($handler) eq "CODE") {
+      # FIXME: ensure that this actually is a POST
       printf STDERR ("Got POST %s\n", $path);
+
       my ($status, $object) = $handler->($cgi);
       printf("HTTP/1.0 %s\r\nContent-Type: application/json\r\n\r\n%s", $status, to_json ($object));
 
