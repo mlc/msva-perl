@@ -41,11 +41,12 @@ use strict;
     return if !ref $cgi;
 
     # FIXME: these should be opening up a json blob instead of using CGI params.
-    my $uid = $cgi->param('uid');
-    my $pkc = $cgi->param('pkc');
-    my $context = $cgi->param('context');
+    my $data = from_json($cgi->param('POSTDATA'));
 
-    my $ret = { foo => 'bar' };
+    use Data::Dumper;
+    print STDERR Dumper($data);
+
+    my $ret = { valid => 'true' };
     # my $status = '404 no match found for the public key in this certificate';
     # or:
     my $status = '200 match found, authentication details to follow';
