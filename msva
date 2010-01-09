@@ -60,6 +60,6 @@ use strict;
   }
 }
 
-# start the server on port 8080
+# start the server on port 8091
 my $server = MSVA->new(8901);
 $server->run();
