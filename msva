@@ -30,7 +30,9 @@ use strict;
       printf STDERR ("Got POST %s\n", $path);
 
       my ($status, $object) = $handler->($cgi);
-      printf("HTTP/1.0 %s\r\nContent-Type: application/json\r\n\r\n%s", $status, to_json ($object));
+      my $ret = to_json($object);
+      printf STDERR ("returning: %s\n", $ret);
+      printf("HTTP/1.0 %s\r\nContent-Type: application/json\r\n\r\n%s", $status, $ret);
 
     } else {
       printf("HTTP/1.0 404 Not Found -- not handled by Monkeysphere validation agent\r\nContent-Type: text/plain\r\n\r\nHTTP/1.0 404 Not Found -- the path:\r\n   %s\r\nis not handled by the MonkeySphere validation agent.\r\nPlease try one of the following paths instead:\r\n\r\n%s\r\n", $path, ' * '.join("\r\n * ", keys %dispatch) );
@@ -41,14 +43,16 @@ use strict;
     my $cgi  = shift;   # CGI.pm object
     return if !ref $cgi;
 
-    # FIXME: these should be opening up a json blob instead of using CGI params.
-    my $uid = $cgi->param('uid');
-    my $pkc = $cgi->param('pkc');
-    my $context = $cgi->param('context');
+    # open a json blob instead of using CGI params.
+    my $data = from_json($cgi->param('POSTDATA'));
 
-    my $ret = { foo => 'bar' };
-    # my $status = '404 no match found for the public key in this certificate';
-    # or:
+    use Data::Dumper;
+    print STDERR Dumper($data);
+
+    my $uid = $data->{context}.'://'.$data->{uid};
+
+    my $ret = { valid => JSON::true,
+                message => sprintf('tried to validate "%s" through the OpenPGP Web of Trust', $uid) };
     my $status = '200 match found, authentication details to follow';
 
     return $status, $ret;
