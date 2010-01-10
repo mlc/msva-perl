@@ -10,13 +10,36 @@ use strict;
   use base qw(HTTP::Server::Simple::CGI);
   use warnings;
   use strict;
+  use Crypt::GPG;
+  use Crypt::X509;
 
   use JSON;
 
   my %dispatch = (
+                  '/' => \&noop,
                   '/reviewcert' => \&reviewcert,
                   '/extracerts' => \&extracerts,
                  );
+
+
+  sub new {
+    my $class = shift;
+    # start the server on port 8901
+    my $self = $class->SUPER::new(8901);
+
+    $self->{_gpg} = new Crypt::GPG;
+
+    bless ($self, $class);
+    return $self;
+  }
+
+  sub noop {
+    my $self = shift;
+    my $cgi = shift;
+    return '200 OK', { available => JSON::true,
+                       protoversion => 1,
+                       server => "MSVA-Perl 0.1" };
+  }
 
   sub handle_request {
     my $self = shift;
@@ -47,9 +70,13 @@ use strict;
     my $data = from_json($cgi->param('POSTDATA'));
 
     use Data::Dumper;
-    print STDERR Dumper($data);
-
     my $uid = $data->{context}.'://'.$data->{uid};
+
+    my $cert = Crypt::X509->new(cert => join('', map(chr, @{$data->{pkc}->{data}})));
+
+    printf STDERR "cert subject was: %s\n", $cert->subject_cn();
+    printf STDERR "cert issuer was: %s\n", $cert->issuer_cn();
+
 
     my $ret = { valid => JSON::true,
                 message => sprintf('tried to validate "%s" through the OpenPGP Web of Trust', $uid) };
@@ -65,6 +92,5 @@ use strict;
   }
 }
 
-# start the server on port 8091
-my $server = MSVA->new(8901);
+my $server = MSVA->new();
 $server->run();
