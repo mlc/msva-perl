@@ -10,7 +10,7 @@ configure do
   git_dir = File.join(File.dirname(__FILE__), ".git")
   if File.directory?(git_dir)
     head = File.read("#{git_dir}/HEAD").strip.split[-1]
-    @@git_rev = File.read(File.join(git_dir, head))
+    @@git_rev = File.read(File.join(git_dir, head)).strip
   end
 end
 
@@ -38,7 +38,7 @@ post '/reviewcert' do
   data = params["pkc"]["data"].pack("C*")
   pkey = OpenSSL::X509::Certificate.new(data).public_key
 
-  { :valid => false, :message => "Just testing!!" }.to_json
+  { :valid => false, :message => "Just testing‼" }.to_json
 end
 
 # TODO: fill in if we need to do so
