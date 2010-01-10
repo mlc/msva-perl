@@ -1,0 +1,52 @@
+Public Key Carriers {
+
+  x509 certs {
+     cert,
+     raw id#,
+  }
+
+  openpgp certs {
+     cert,
+     raw id#,
+  }
+
+  raw public keys {
+    raw id#,
+    key,
+    revoked?,
+  }
+}
+
+OpenPGP subkeys {
+  key,
+  raw id#,
+}
+
+ownertrust {
+  raw id#,
+  quantity,
+  depth,
+  uid,
+  scope,
+}
+  
+certs {
+  issuer (pkc),
+  subject (pkc),
+  uid,
+  expiry,
+  add'l data,
+}
+
+exceptions {
+  uid,
+  pkc,
+  context,
+  expiry
+}
+
+config vars {
+  preferred keyserver,
+  preferred digest algorithms,
+  et cetera,
+}
