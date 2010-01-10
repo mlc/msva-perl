@@ -16,6 +16,7 @@ use strict;
   use JSON;
 
   my %dispatch = (
+                  '/' => \&noop,
                   '/reviewcert' => \&reviewcert,
                   '/extracerts' => \&extracerts,
                  );
@@ -30,6 +31,14 @@ use strict;
 
     bless ($self, $class);
     return $self;
+  }
+
+  sub noop {
+    my $self = shift;
+    my $cgi = shift;
+    return '200 OK', { available => JSON::true,
+                       protoversion => 1,
+                       server => "MSVA-Perl 0.1" };
   }
 
   sub handle_request {
