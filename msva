@@ -83,8 +83,8 @@ use strict;
 
     my $cert = Crypt::X509->new(cert => join('', map(chr, @{$data->{pkc}->{data}})));
 
-    printf STDERR "cert subject was: %s\n", $cert->subject_cn();
-    printf STDERR "cert issuer was: %s\n", $cert->issuer_cn();
+    printf STDERR "cert subject: %s\n", $cert->subject_cn();
+    printf STDERR "cert issuer: %s\n", $cert->issuer_cn();
 
 
     my $ret = { valid => JSON::true,
