@@ -11,6 +11,7 @@ use strict;
   require Crypt::X509;
 
   use JSON;
+  use POSIX qw(strftime);
 
   my %dispatch = (
                   '/' => \&noop,
@@ -42,6 +43,14 @@ use strict;
     my $self = shift;
     my $cgi  = shift;
 
+    # FIXME: check SO_PEERCRED -- if this was a TCP socket, Linux
+    # might not be able to support SO_PEERCRED (even on the loopback),
+    # though apparently some kernels (Solaris?) are able to.
+
+    # another option in Linux would be to parse the contents of
+    # /proc/net/tcp to find the uid of the peer process based on that
+    # information.
+
     my $path = $cgi->path_info();
     my $handler = $dispatch{$path};
 
@@ -52,7 +61,10 @@ use strict;
       my ($status, $object) = $handler->($cgi);
       my $ret = to_json($object);
       printf STDERR ("returning: %s\n", $ret);
-      printf("HTTP/1.0 %s\r\nContent-Type: application/json\r\n\r\n%s", $status, $ret);
+      printf("HTTP/1.0 %s\r\nDate: %s\r\nContent-Type: application/json\r\n\r\n%s",
+             $status,
+             strftime("%a, %d %b %Y %H:%M:%S %z", localtime(time())),
+             $ret);
 
     } else {
       printf("HTTP/1.0 404 Not Found -- not handled by Monkeysphere validation agent\r\nContent-Type: text/plain\r\n\r\nHTTP/1.0 404 Not Found -- the path:\r\n   %s\r\nis not handled by the MonkeySphere validation agent.\r\nPlease try one of the following paths instead:\r\n\r\n%s\r\n", $path, ' * '.join("\r\n * ", keys %dispatch) );
