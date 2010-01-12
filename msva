@@ -1,5 +1,21 @@
 #!/usr/bin/perl -wT
 
+# Monkeysphere Validation Agent, Perl version
+# Copyright © 2010 Daniel Kahn Gillmor <dkg@fifthhorseman.net>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
 use warnings;
 use strict;
 
@@ -14,11 +30,41 @@ use strict;
   use POSIX qw(strftime);
 
   my %dispatch = (
-                  '/' => \&noop,
-                  '/reviewcert' => \&reviewcert,
-                  '/extracerts' => \&extracerts,
+                  '/' => { handler => \&noop,
+                           methods => { 'GET' => 1 },
+                         },
+                  '/reviewcert' => { handler => \&reviewcert,
+                                     methods => { 'POST' => 1 },
+                                   },
+                  '/extracerts' => { handler => \&extracerts,
+                                     methods => { 'POST' => 1 },
+                                   },
                  );
 
+  my %loglevels = (
+                   'silent' => 1,
+                   'quiet' => 2,
+                   'fatal' => 3,
+                   'error' => 4,
+                   'info' => 5,
+                   'verbose' => 6,
+                   'debug' => 7,
+                   'debug1' => 7,
+                   'debug2' => 8,
+                   'debug3' => 9,
+                  );
+
+  sub msvalog {
+#    my $self = shift;
+    my $msglevel = shift;
+
+    my $level = $loglevels{lc($ENV{MSVA_LOG_LEVEL})};
+    $level = $loglevels{info} if (! defined $level);
+
+    if ($loglevels{lc($msglevel)} <= $level) {
+      printf STDERR @_;
+    }
+  };
 
   sub new {
     my $class = shift;
@@ -54,38 +100,51 @@ use strict;
     my $path = $cgi->path_info();
     my $handler = $dispatch{$path};
 
-    if (ref($handler) eq "CODE") {
-      # FIXME: ensure that this actually is a POST
-      printf STDERR ("Got POST %s\n", $path);
+    if (ref($handler) eq "HASH") {
+      if (! exists $handler->{methods}->{$cgi->request_method()}) {
+        printf("HTTP/1.0 405 Method not allowed\r\nAllow: %s\r\nDate: %s\r\n",
+               join(', ', keys(%{$handler->{methods}})),
+               strftime("%a, %d %b %Y %H:%M:%S %z", localtime(time())));
+      } elsif (ref($handler->{handler}) ne "CODE") {
+        printf("HTTP/1.0 500 Server Error\r\nDate: %s\r\n",
+               strftime("%a, %d %b %Y %H:%M:%S %z", localtime(time())));
+      } else {
+        my $data = {};
+        my $ctype = $cgi->content_type();
+        msvalog('info', "Got %s %s (Content-Type: %s)\n", $cgi->request_method(), $path, defined $ctype ? $ctype : '**none supplied**');
+        if (defined $ctype) {
+          my @ctypes = split(/; */, $ctype);
+          $ctype = shift @ctypes;
+          if ($ctype eq 'application/json') {
+            $data = from_json($cgi->param('POSTDATA'));
+          }
+        };
 
-      my ($status, $object) = $handler->($cgi);
-      my $ret = to_json($object);
-      printf STDERR ("returning: %s\n", $ret);
-      printf("HTTP/1.0 %s\r\nDate: %s\r\nContent-Type: application/json\r\n\r\n%s",
-             $status,
-             strftime("%a, %d %b %Y %H:%M:%S %z", localtime(time())),
-             $ret);
-
+        my ($status, $object) = $handler->{handler}($data);
+        my $ret = to_json($object);
+        msvalog('info', "returning: %s\n", $ret);
+        printf("HTTP/1.0 %s\r\nDate: %s\r\nContent-Type: application/json\r\n\r\n%s",
+               $status,
+               strftime("%a, %d %b %Y %H:%M:%S %z", localtime(time())),
+               $ret);
+      }
     } else {
-      printf("HTTP/1.0 404 Not Found -- not handled by Monkeysphere validation agent\r\nContent-Type: text/plain\r\n\r\nHTTP/1.0 404 Not Found -- the path:\r\n   %s\r\nis not handled by the MonkeySphere validation agent.\r\nPlease try one of the following paths instead:\r\n\r\n%s\r\n", $path, ' * '.join("\r\n * ", keys %dispatch) );
+      printf("HTTP/1.0 404 Not Found -- not handled by Monkeysphere validation agent\r\nContent-Type: text/plain\r\nDate: %s\r\n\r\nHTTP/1.0 404 Not Found -- the path:\r\n   %s\r\nis not handled by the MonkeySphere validation agent.\r\nPlease try one of the following paths instead:\r\n\r\n%s\r\n",
+             strftime("%a, %d %b %Y %H:%M:%S %z", localtime(time())),
+             $path, ' * '.join("\r\n * ", keys %dispatch) );
     }
   }
 
   sub reviewcert {
-    my $cgi  = shift;   # CGI.pm object
-    return if !ref $cgi;
+    my $data  = shift;
+    return if !ref $data;
 
-    # open a json blob instead of using CGI params.
-    my $data = from_json($cgi->param('POSTDATA'));
-
-    use Data::Dumper;
     my $uid = $data->{context}.'://'.$data->{uid};
 
     my $cert = Crypt::X509->new(cert => join('', map(chr, @{$data->{pkc}->{data}})));
 
-    printf STDERR "cert subject: %s\n", $cert->subject_cn();
-    printf STDERR "cert issuer: %s\n", $cert->issuer_cn();
-
+    msvalog('info', "cert subject: %s\n", $cert->subject_cn());
+    msvalog('info', "cert issuer: %s\n", $cert->issuer_cn());
 
     my $ret = { valid => JSON::true,
                 message => sprintf('tried to validate "%s" through the OpenPGP Web of Trust', $uid) };
@@ -95,7 +154,7 @@ use strict;
   }
 
   sub extracerts {
-    my $cgi = shift;
+    my $data = shift;
 
     return '500 not yet implemented', { };
   }
