@@ -25,6 +25,8 @@ use strict;
   use parent qw(HTTP::Server::Simple::CGI);
   require Crypt::GPG;
   require Crypt::X509;
+  use Convert::ASN1;
+  use MIME::Base64;
 
   use JSON;
   use POSIX qw(strftime);
@@ -54,6 +56,17 @@ use strict;
                    'debug3' => 9,
                   );
 
+my $rsa_decoder = Convert::ASN1->new;
+$rsa_decoder->prepare(q<
+
+   SEQUENCE {
+        modulus INTEGER,
+        exponent INTEGER
+   }
+          >);
+
+#   $rsa_decoder->configure(-options => 'DER');
+
   sub msvalog {
 #    my $self = shift;
     my $msglevel = shift;
@@ -72,6 +85,7 @@ use strict;
     my $self = $class->SUPER::new(8901);
 
     $self->{_gpg} = new Crypt::GPG;
+
 
     bless ($self, $class);
     return $self;
@@ -141,14 +155,38 @@ use strict;
 
     my $uid = $data->{context}.'://'.$data->{uid};
 
-    my $cert = Crypt::X509->new(cert => join('', map(chr, @{$data->{pkc}->{data}})));
-
+    my $rawdata = join('', map(chr, @{$data->{pkc}->{data}}));
+    my $cert = Crypt::X509->new(cert => $rawdata);
     msvalog('info', "cert subject: %s\n", $cert->subject_cn());
     msvalog('info', "cert issuer: %s\n", $cert->issuer_cn());
+    msvalog('info', "cert pubkey algo: %s\n", $cert->PubKeyAlg());
+    msvalog('info', "cert pubkey: %s\n", unpack('H*', $cert->pubkey()));
 
-    my $ret = { valid => JSON::true,
-                message => sprintf('tried to validate "%s" through the OpenPGP Web of Trust', $uid) };
-    my $status = '200 match found, authentication details to follow';
+#    if ($cert->pubkey_algorithm
+#    msvalog('info', "public key: %s\n", $cert->
+
+    my $status = '200 OK';
+    my $ret =  { valid => JSON::false,
+                 message => 'Unknown failure',
+               };
+    if ($cert->PubKeyAlg() ne 'RSA') {
+      $ret->{message} = sprintf('public key was algo "%s" (OID %s).  MSVA.pl only supports RSA',
+                                $cert->PubKeyAlg(), $cert->pubkey_algorithm);
+    } elsif ($cert->pubkey_size() < 1024) { # FIXME: this appears to be the full pubkey, including DER overhead
+      $ret->{message} = sprintf('public key size is less than 1024 bits (was: %d bits)', $cert->pubkey_size());
+    } else {
+      my $key = $rsa_decoder->decode($cert->pubkey());
+      if ($key) {
+        msvalog('info', "cert info:\nmodulus: %s\nexponent: %d\n",
+                $key->{modulus}->as_hex(),
+                $key->{exponent},
+               );
+        $ret->{message} = sprintf('tried to validate "%s" through the OpenPGP Web of Trust, failed.', $uid);
+      } else {
+        msvalog('info', "failed to decode %s\n", unpack('H*', $cert->pubkey()));
+        $ret->{message} = sprintf('tried to validate "%s" through the OpenPGP Web of Trust', $uid);
+      }
+    }
 
     return $status, $ret;
   }
