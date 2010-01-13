@@ -99,6 +99,25 @@ $rsa_decoder->prepare(q<
                        server => "MSVA-Perl 0.1" };
   }
 
+  # returns an empty list if bad key found.
+  sub parse_openssh_pubkey {
+    my $data = shift;
+    my ($label, $prop) = split(/ +/, $data);
+    $prop = decode_base64($prop) or return ();
+
+    msvalog('debug', "key properties: %s\n", unpack('H*', $prop));
+    my @out;
+    while (length($prop) > 4) {
+      my $size = unpack('N', substr($prop, 0, 4));
+      msvalog('debug', "size: 0x%08x\n", $size);
+      return () if (length($prop) < $size + 4);
+      push(@out, substr($prop, 4, $size));
+      $prop = substr($prop, 4 + $size);
+    }
+    return () if ($label ne $out[0]);
+    return @out;
+  }
+
   sub handle_request {
     my $self = shift;
     my $cgi  = shift;
@@ -125,7 +144,7 @@ $rsa_decoder->prepare(q<
       } else {
         my $data = {};
         my $ctype = $cgi->content_type();
-        msvalog('info', "Got %s %s (Content-Type: %s)\n", $cgi->request_method(), $path, defined $ctype ? $ctype : '**none supplied**');
+        msvalog('verbose', "Got %s %s (Content-Type: %s)\n", $cgi->request_method(), $path, defined $ctype ? $ctype : '**none supplied**');
         if (defined $ctype) {
           my @ctypes = split(/; */, $ctype);
           $ctype = shift @ctypes;
@@ -149,6 +168,8 @@ $rsa_decoder->prepare(q<
     }
   }
 
+
+
   sub reviewcert {
     my $data  = shift;
     return if !ref $data;
@@ -157,13 +178,10 @@ $rsa_decoder->prepare(q<
 
     my $rawdata = join('', map(chr, @{$data->{pkc}->{data}}));
     my $cert = Crypt::X509->new(cert => $rawdata);
-    msvalog('info', "cert subject: %s\n", $cert->subject_cn());
-    msvalog('info', "cert issuer: %s\n", $cert->issuer_cn());
-    msvalog('info', "cert pubkey algo: %s\n", $cert->PubKeyAlg());
-    msvalog('info', "cert pubkey: %s\n", unpack('H*', $cert->pubkey()));
-
-#    if ($cert->pubkey_algorithm
-#    msvalog('info', "public key: %s\n", $cert->
+    msvalog('verbose', "cert subject: %s\n", $cert->subject_cn());
+    msvalog('verbose', "cert issuer: %s\n", $cert->issuer_cn());
+    msvalog('verbose', "cert pubkey algo: %s\n", $cert->PubKeyAlg());
+    msvalog('verbose', "cert pubkey: %s\n", unpack('H*', $cert->pubkey()));
 
     my $status = '200 OK';
     my $ret =  { valid => JSON::false,
@@ -172,19 +190,45 @@ $rsa_decoder->prepare(q<
     if ($cert->PubKeyAlg() ne 'RSA') {
       $ret->{message} = sprintf('public key was algo "%s" (OID %s).  MSVA.pl only supports RSA',
                                 $cert->PubKeyAlg(), $cert->pubkey_algorithm);
-    } elsif ($cert->pubkey_size() < 1024) { # FIXME: this appears to be the full pubkey, including DER overhead
-      $ret->{message} = sprintf('public key size is less than 1024 bits (was: %d bits)', $cert->pubkey_size());
     } else {
       my $key = $rsa_decoder->decode($cert->pubkey());
       if ($key) {
-        msvalog('info', "cert info:\nmodulus: %s\nexponent: %d\n",
+        # make sure that the returned integers are Math::BigInts:
+        $key->{exponent} = Math::BigInt->new($key->{exponent}) unless (ref($key->{exponent}));
+        $key->{modulus} = Math::BigInt->new($key->{modulus}) unless (ref($key->{modulus}));
+        msvalog('debug', "cert info:\nmodulus: %s\nexponent: %s\n",
                 $key->{modulus}->as_hex(),
-                $key->{exponent},
+                $key->{exponent}->as_hex(),
                );
-        $ret->{message} = sprintf('tried to validate "%s" through the OpenPGP Web of Trust, failed.', $uid);
+
+        if ($key->{modulus}->copy()->blog(2) < 1000) { # FIXME: this appears to be the full pubkey, including DER overhead
+          $ret->{message} = sprintf('public key size is less than 1000 bits (was: %d bits)', $cert->pubkey_size());
+        } else {
+          $ret->{message} = sprintf('tried to validate "%s" through the OpenPGP Web of Trust, failed.', $uid);
+
+          my $fh;
+          # clean up the path for taint-check mode:
+          $ENV{PATH} = '/usr/local/bin:/usr/bin:/bin';
+
+          open($fh, '-|', 'monkeysphere', 'keys-for-userid', $uid);
+          while(<$fh>) {
+            my @keyinfo = parse_openssh_pubkey($_);
+            if (scalar(@keyinfo) != 3 || $keyinfo[0] ne "ssh-rsa") {
+              msvalog('info', "got unknown or non-RSA key from monkeysphere\n");
+              next;
+            }
+            msvalog('verbose', "got good RSA key from monkeysphere: \nExponent: 0x%s\nModulus: 0x%s\n", unpack('H*', $keyinfo[1]), unpack('H*', $keyinfo[2]));
+            if ($key->{exponent}->bcmp(Math::BigInt->new('0x'.unpack('H*', $keyinfo[1]))) == 0 &&
+                $key->{modulus}->bcmp(Math::BigInt->new('0x'.unpack('H*', $keyinfo[2]))) == 0) {
+              msvalog('verbose', "...and it matches!\n");
+              $ret->{valid} = JSON::true;
+              $ret->{message} = sprintf('Successfully validated "%s" through the OpenPGP Web of Trust.', $uid);
+            }
+          }
+        }
       } else {
-        msvalog('info', "failed to decode %s\n", unpack('H*', $cert->pubkey()));
-        $ret->{message} = sprintf('tried to validate "%s" through the OpenPGP Web of Trust', $uid);
+        msvalog('error', "failed to decode %s\n", unpack('H*', $cert->pubkey()));
+        $ret->{message} = sprintf('failed to decode the public key', $uid);
       }
     }
 
