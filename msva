@@ -204,7 +204,7 @@ $rsa_decoder->prepare(q<
         if ($key->{modulus}->copy()->blog(2) < 1000) { # FIXME: this appears to be the full pubkey, including DER overhead
           $ret->{message} = sprintf('public key size is less than 1000 bits (was: %d bits)', $cert->pubkey_size());
         } else {
-          $ret->{message} = sprintf('failed to validate "%s" through the OpenPGP Web of Trust.', $uid);
+          $ret->{message} = sprintf('Failed to validate "%s" through the OpenPGP Web of Trust.', $uid);
 
           my $fh;
           # clean up the path for taint-check mode:
