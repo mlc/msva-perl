@@ -174,7 +174,7 @@ $rsa_decoder->prepare(q<
     my $data  = shift;
     return if !ref $data;
 
-    my $uid = $data->{context}.'://'.$data->{uid};
+    my $uid = $data->{context}.'://'.$data->{peer};
 
     my $rawdata = join('', map(chr, @{$data->{pkc}->{data}}));
     my $cert = Crypt::X509->new(cert => $rawdata);
