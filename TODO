@@ -1,17 +1,3 @@
-- xul-ext:
-  - improve listener logic
-  - initialization check that agent is running
-  - improve logging (do we need levels?)
-  - give "monkeysphere" info in:
-    - favicon
-    - cert validity in certificate view dialog for site
-  - add tool? menu item clear all monkeysphere cache
-  - cache 'apd.uid' should be 'apd.host'
-  - should manual cache clear reload page? (doesn't for cert clear)
-  - status menu option to get site cert
-  - status menu option to delete site cert?
-
-- msva (perl):
-  - not logging very much
-    - log "query received" (at least)
-  - not accepting MONKEYSPHERE_ env vars
+- not accepting MONKEYSPHERE_ env vars
+- not logging very much
+  - log "query received" (at least)
