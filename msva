@@ -82,6 +82,7 @@ use strict;
     my $class = shift;
     # start the server on port 8901
     my $self = $class->SUPER::new(8901);
+    $self->host('localhost');
 
     $self->{allowed_uids} = {};
     if (exists $ENV{MSVA_ALLOWED_USERS}) {
