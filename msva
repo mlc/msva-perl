@@ -23,7 +23,6 @@ use strict;
   package MSVA;
 
   use parent qw(HTTP::Server::Simple::CGI);
-  require Crypt::GPG;
   require Crypt::X509;
   use Convert::ASN1;
   use MIME::Base64;
@@ -59,8 +58,8 @@ use strict;
                    'debug3' => 9,
                   );
 
-my $rsa_decoder = Convert::ASN1->new;
-$rsa_decoder->prepare(q<
+  my $rsa_decoder = Convert::ASN1->new;
+  $rsa_decoder->prepare(q<
 
    SEQUENCE {
         modulus INTEGER,
@@ -68,10 +67,7 @@ $rsa_decoder->prepare(q<
    }
           >);
 
-#   $rsa_decoder->configure(-options => 'DER');
-
   sub msvalog {
-#    my $self = shift;
     my $msglevel = shift;
 
     my $level = $loglevels{lc($ENV{MSVA_LOG_LEVEL})};
@@ -87,8 +83,27 @@ $rsa_decoder->prepare(q<
     # start the server on port 8901
     my $self = $class->SUPER::new(8901);
 
-    $self->{_gpg} = new Crypt::GPG;
-
+    $self->{allowed_uids} = {};
+    if (exists $ENV{MSVA_ALLOWED_USERS}) {
+      msvalog('verbose', "MSVA_ALLOWED_USERS environment variable is set.\nLimiting access to specified users.\n");
+      foreach my $user (split(/ +/, $ENV{MSVA_ALLOWED_USERS})) {
+        my ($name, $passwd, $uid);
+        if ($user =~ /^[0-9]+$/) {
+          $uid = $user + 0; # force to integer
+        } else {
+          ($name,$passwd,$uid) = getpwnam($user);
+        }
+        if (defined $uid) {
+          msvalog('verbose', "Allowing access from user ID %d\n", $uid);
+          $self->{allowed_uids}->{$uid} = $user;
+        } else {
+          msvalog('error', "Could not find user '%d'; not allowing\n", $user);
+        }
+      }
+    } else {
+      # default is to allow access only to the current user
+      $self->{allowed_uids}->{POSIX::getuid()} = 'self';
+    }
 
     bless ($self, $class);
     return $self;
@@ -213,6 +228,7 @@ $rsa_decoder->prepare(q<
                   }
                 }
               }
+            msvalog('error', "Warning! could not find peer information in %s.  Not verifying.\n", $infofile) unless defined $remotepeerid;
             }
           } else { # FIXME: we couldn't read the file.  what should we
                    # do besides warning?
@@ -232,8 +248,15 @@ $rsa_decoder->prepare(q<
     my $remotepeerid =  get_remote_peer_id(select);
 
     if (defined $remotepeerid) {
-      # FIXME: test that this is the same user id number, abort otherwise
-      # FIXME: maybe allow a space-separated list of allowed users from an environment variable?
+      # test that this is an allowed user:
+      if (exists $self->{allowed_uids}->{$remotepeerid}) {
+        msvalog('verbose', "Allowing access from uid %d (%s)\n", $remotepeerid, $self->{allowed_uids}->{$remotepeerid});
+      } else {
+        msvalog('error', "MSVA client connection from uid %d, forbidden.\n", $remotepeerid);
+        printf("HTTP/1.0 403 Forbidden -- peer does not match local user ID\r\nContent-Type: text/plain\r\nDate: %s\r\n\r\nHTTP/1.1 403 Not Found -- peer does not match the local user ID.  Are you sure the agent is running as the same user?\r\n",
+               strftime("%a, %d %b %Y %H:%M:%S %z", localtime(time())),);
+        return;
+      }
     }
 
     my $path = $cgi->path_info();
