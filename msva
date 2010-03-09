@@ -85,8 +85,14 @@ use strict;
 
   sub new {
     my $class = shift;
+
+    my $port = 8901;
+    if (exists $ENV{MSVA_PORT}) {
+      $port = $ENV{MSVA_PORT} + 0;
+      die sprintf("not a reasonable port %d", $port) if (($port >= 65536) || $port <= 0);
+    }
     # start the server on port 8901
-    my $self = $class->SUPER::new(8901);
+    my $self = $class->SUPER::new($port);
 
     $self->{allowed_uids} = {};
     if (exists $ENV{MSVA_ALLOWED_USERS}) {
