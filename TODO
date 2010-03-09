@@ -1,3 +1,0 @@
-- not accepting MONKEYSPHERE_ env vars
-- not logging very much
-  - log "query received" (at least)
