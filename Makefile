@@ -7,12 +7,18 @@
 
 VERSION=`dpkg-parsechangelog -lChangelog | grep ^Version: | cut -f2 -d\ `
 
-../msva-perl_$(VERSION).orig.tar.gz: msva-perl msva.protocol.README COPYING
-	git archive --format tar -o $@ --prefix=msva-perl-$(VERSION)/ $<
+all: msva-perl.1
 
-tarball: ../msva-perl_$(VERSION).orig.tar.gz
+msva-perl.1: msva-perl
+	pod2man msva-perl msva-perl.1
+
+tarball: msva-perl msva.protocol.README COPYING
+	git archive --format tar --prefix=msva-perl-$(VERSION)/ HEAD | gzip -n -9 > ../msva-perl_$(VERSION).orig.tar.gz
 
 debian-package: tarball
 	git buildpackage -uc -us
 
-.PHONY: tarball debian-package
+clean: 
+	rm -f msva-perl.1
+
+.PHONY: tarball debian-package all clean
