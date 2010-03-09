@@ -29,6 +29,7 @@ use strict;
   use IO::Socket;
   use IO::File;
   use Socket;
+  use Net::Server::Fork;
 
   use JSON;
   use POSIX qw(strftime);
@@ -78,11 +79,14 @@ use strict;
     }
   };
 
+  sub net_server {
+    return 'Net::Server::Fork';
+  };
+
   sub new {
     my $class = shift;
     # start the server on port 8901
     my $self = $class->SUPER::new(8901);
-    $self->host('localhost');
 
     $self->{allowed_uids} = {};
     if (exists $ENV{MSVA_ALLOWED_USERS}) {
@@ -375,4 +379,4 @@ use strict;
 }
 
 my $server = MSVA->new();
-$server->run();
+$server->run(host=>'localhost');
