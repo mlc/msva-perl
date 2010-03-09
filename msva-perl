@@ -34,6 +34,8 @@ use strict;
   use JSON;
   use POSIX qw(strftime);
 
+  my $version = '0.1';
+
   my %dispatch = (
                   '/' => { handler => \&noop,
                            methods => { 'GET' => 1 },
@@ -125,7 +127,7 @@ use strict;
     my $cgi = shift;
     return '200 OK', { available => JSON::true,
                        protoversion => 1,
-                       server => "MSVA-Perl 0.1" };
+                       server => "MSVA-Perl ".$version };
   }
 
   # returns an empty list if bad key found.
