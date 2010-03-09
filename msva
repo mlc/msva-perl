@@ -386,3 +386,99 @@ use strict;
 
 my $server = MSVA->new();
 $server->run(host=>'localhost');
+__END__
+
+=head1 NAME
+
+msva-perl - Perl implementation of a Monkeysphere Validation Agent
+
+=head1 SYNOPSIS
+
+  msva-perl
+
+=head1 ABSTRACT
+
+msva-perl provides a Perl implementation of the Monkeysphere
+Validation Agent, a certificate validation service.
+
+=head1 INTRODUCTION
+
+The Monkeysphere Validation Agent offers a local service for tools to
+validate certificates (both X.509 and OpenPGP) and other public keys.
+
+Clients of the validation agent query it with a public key carrier (a
+raw public key, or some flavor of certificate), the supposed name of
+the remote peer offering the pubkey, and the context in which the
+validation check is relevant (e.g. ssh, https, etc).
+
+The validation agent then tells the client whether it was able to
+successfully validate the peer's use of the public key in the given
+context.
+
+msva-perl relies on monkeysphere(1), which uses the user's OpenPGP web
+of trust to validate the peer's use of public keys.
+
+=head1 ENVIRONMENT VARIABLES
+
+msva-perl is configured by means of environment variables.
+
+=over 4
+
+=item MSVA_LOG_LEVEL
+
+msva-perl logs messages about its operation to stderr.  MSVA_LOG_LEVEL
+controls its verbosity, and should be one of (in increasing
+verbosity): silent, quiet, fatal, error, info, verbose, debug, debug1,
+debug2, debug3.  Default is 'info'.
+
+=item MSVA_ALLOWED_USERS
+
+If your system is capable of it, msva-perl tries to figure out the
+owner of the connecting client.  If MSVA_ALLOWED_USERS is unset,
+msva-perl will only permit connections from the user msva is running
+as.  If you set MSVA_ALLOWED_USERS, msva-perl will treat it as a list
+of local users (by name or user ID) who are allowed to connect.
+
+=item MSVA_PORT
+
+msva-perl listens on a local TCP socket to facilitate access.  You can
+choose what port to bind to by setting MSVA_PORT.  Default is 8901.
+
+=head1 COMMUNICATION PROTOCOL DETAILS
+
+Communications with the Monkeysphere Validation Agent are in the form
+of JSON requests over plain HTTP.  Responses from the agent are also
+JSON objects.  For details on the structure of the requests and
+responses, please see
+http://web.monkeysphere.info/validation-agent/protocol
+
+=head1 SECURITY CONSIDERATIONS
+
+msva-perl deliberately binds to the loopback adapter (via named lookup
+of "localhost") so that remote users do not get access to the daemon.
+On systems (like Linux) which report ownership of TCP sockets in
+/proc/net/tcp, msva-perl will refuse access from random users (see
+MSVA_ALLOWED_USERS above).
+
+=head1 SEE ALSO
+
+monkeysphere(1), monkeysphere(7)
+
+=head1 BUGS AND FEEDBACK
+
+Bugs or feature requests for msva-perl should be filed with the
+Monkeysphere project's bug tracker at
+https://labs.riseup.net/code/projects/monkeysphere/issues/
+
+=head1 AUTHORS AND CONTRIBUTORS
+
+Daniel Kahn Gillmor E<lt>dkg@fifthhorseman.net<gt>
+
+The Monkeysphere Team http://web.monkeysphere.info/
+
+=head1 COPYRIGHT AND LICENSE
+
+Copyright © Daniel Kahn Gillmor and others from the Monkeysphere team.
+msva-perl is free software, distributed under the GNU Public License,
+version 3 or later.
+
