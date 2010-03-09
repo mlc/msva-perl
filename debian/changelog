@@ -1,0 +1,6 @@
+msva-perl (0.1-1) unstable; urgency=low
+
+  * Initial Release (Closes: #573120)
+
+ -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Tue, 09 Mar 2010 00:39:56 -0500
+

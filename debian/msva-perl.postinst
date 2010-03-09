@@ -1,0 +1,11 @@
+#!/bin/sh
+
+set -e
+
+if [ "$1" = "configure" ] || [ "$1" = "abort-upgrade" ]; then
+    update-alternatives --install /usr/bin/monkeysphere-validation-agent monkeysphere-validation-agent /usr/bin/msva-perl 40 \
+      --slave /usr/share/man/man1/monkeysphere-validation-agent.1.gz monkeysphere-validation-agent.1.gz \
+      /usr/share/man/man1/msva-perl.1.gz
+fi
+
+#DEBHELPER#
