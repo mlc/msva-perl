@@ -446,6 +446,8 @@ of local users (by name or user ID) who are allowed to connect.
 msva-perl listens on a local TCP socket to facilitate access.  You can
 choose what port to bind to by setting MSVA_PORT.  Default is 8901.
 
+=back
+
 =head1 COMMUNICATION PROTOCOL DETAILS
 
 Communications with the Monkeysphere Validation Agent are in the form
