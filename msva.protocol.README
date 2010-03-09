@@ -6,8 +6,8 @@ msva is the Monkeysphere Validation Agent.
 Its goal is to simplify bindings between cryptographic tokens and the
 real-world entities that humans actually care about.
 
-In its current technical conception, the validation agent is a minimal
-HTTP server that accepts two different requests:
+In its current form, the validation agent is conceived of as a
+minimalistic HTTP server that accepts two different requests:
 
 GET /  -- initial contact query, protocol version compatibility.
   (no query parameters)
@@ -17,13 +17,18 @@ POST /reviewcert  -- request validation of a certificate
  (query parameters: uid, context, pkc)
  (returns: valid, message)
 
-query parameters are posted as a JSON string (*not* as www-form-encoded).
+Query parameters are posted as a JSON blob (*not* as
+www-form-encoded).
 
-the variables that are returned are application/json as well.
+The variables that are returned are application/json as well.
 
 (PKC means: public key carrier: raw key, OpenPGP cert, or X.509 cert)
 (UID means: User ID (like in OpenPGP))
 (context means: (this is too vague right now) something like "this certificate was used to try to identify an HTTPS server")
+
+
+Full details on the Monkeysphere Validation Agent protocol should be
+available at http://web.monkeysphere.info/validation-agent/protocol
 
 Authors: Daniel Kahn Gillmor <dkg@fifthhorseman.net>
          Matthew James Goins
