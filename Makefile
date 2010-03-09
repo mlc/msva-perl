@@ -12,13 +12,10 @@ all: msva-perl.1
 msva-perl.1: msva-perl
 	pod2man msva-perl msva-perl.1
 
-tarball: msva-perl msva.protocol.README COPYING
-	git archive --format tar --prefix=msva-perl-$(VERSION)/ HEAD | gzip -n -9 > ../msva-perl_$(VERSION).orig.tar.gz
-
-debian-package: tarball
-	git buildpackage -uc -us
+release: msva-perl msva.protocol.README COPYING Makefile
+	git archive --format tar --prefix=msva-perl-$(VERSION)/ HEAD | gzip -n -9 > ../msva-perl-$(VERSION).tar.gz
 
 clean: 
 	rm -f msva-perl.1
 
-.PHONY: tarball debian-package all clean
+.PHONY: release all clean
