@@ -1,3 +1,11 @@
+HYPOTHETICAL DOCS
+----------------
+
+These notes describe what a hypothetical schema for a self-implemented
+Monkeysphere Validation Agent (with no reliance on gpg) might look
+like.  This describes only the relational tables that might be
+relevant, and it is in some kind of pseudo-SQL.
+
 Public Key Carriers {
 
   x509 certs {
