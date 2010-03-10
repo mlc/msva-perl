@@ -13,19 +13,15 @@ all: msva-perl.1
 msva-perl.1: msva-perl
 	pod2man msva-perl msva-perl.1
 
-release: tarball
-	git tag -s msva-perl/$(VERSION) -m "releasing msva-perl version $(VERSION)"
-
-tarball: msva-perl msva.protocol.README COPYING Makefile
-	git archive --format tar --prefix=msva-perl-$(VERSION)/ HEAD | gzip -n -9 > ../msva-perl-$(VERSION).tar.gz
-
 clean: 
 	rm -f msva-perl.1
 
 debian-package:
-	debuild -uc -us -i'^\.git|notes_from_whiteboard\.txt'
+	git buildpackage -uc -us --git-upstream-branch=master --git-debian-branch=debian --git-no-pristine-tar
 
+upstream-tag:
+	git tag -s msva-perl/$(VERSION) -m "releasing msva-perl version $(VERSION)"
 debian-tag:
 	git tag -s debian/$(DEBIAN_VERSION) -m "tagging msva-perl debian packaging version $(DEBIAN_VERSION)"
 
-.PHONY: release tarball debian-package debian-tag all clean
+.PHONY: upstream-tag debian-package debian-tag all clean

@@ -1,3 +1,11 @@
+msva-perl (0.2~pre1) UNRELEASED;
+
+  * now shipping README.schema (notes about possible future MSVA
+    implementations)
+  * cleanup Makefile and distribution strategies.
+
+ -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Wed, 10 Mar 2010 02:41:19 -0500
+
 msva-perl (0.1) upstream;
   
    * first release.
