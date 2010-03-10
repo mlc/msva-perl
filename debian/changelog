@@ -1,3 +1,9 @@
+msva-perl (0.2~pre-1~pre) UNRELEASED; urgency=low
+
+  * New Upstream Release.
+
+ -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Wed, 10 Mar 2010 02:46:00 -0500
+
 msva-perl (0.1-2) unstable; urgency=low
 
   * Add missing Depends: libjson-perl
