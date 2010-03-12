@@ -74,7 +74,7 @@ use strict;
     my $msglevel = shift;
 
     my $level = $loglevels{lc($ENV{MSVA_LOG_LEVEL})};
-    $level = $loglevels{info} if (! defined $level);
+    $level = $loglevels{error} if (! defined $level);
 
     if ($loglevels{lc($msglevel)} <= $level) {
       printf STDERR @_;
@@ -83,7 +83,7 @@ use strict;
 
   sub get_log_level {
     my $level = $loglevels{lc($ENV{MSVA_LOG_LEVEL})};
-    $level = $loglevels{info} if (! defined $level);
+    $level = $loglevels{error} if (! defined $level);
     return $level;
   }
 
@@ -463,6 +463,11 @@ use strict;
           exec(@args) or exit 111;
         }
       }
+    } else {
+      printf("MONKEYSPHERE_VALIDATION_AGENT_SOCKET=http://localhost:%d;\nexport MONKEYSPHERE_VALIDATION_AGENT_SOCKET;\n", $self->port);
+      # FIXME: consider daemonizing here to behave more like
+      # ssh-agent.  maybe avoid backgrounding by setting
+      # MSVA_NO_BACKGROUND.
     };
   }
 
@@ -478,7 +483,8 @@ use strict;
 my $server = MSVA->new();
 $server->run(host=>'localhost',
              log_level=>MSVA::get_log_level(),
-             user => $>,  # explicitly choose regular user (avoids a warning)
+             user => $>,  # explicitly choose regular user and group (avoids spew)
+             group => $),
              msva=>$server);
 __END__
 
@@ -536,7 +542,7 @@ msva-perl is configured by means of environment variables.
 msva-perl logs messages about its operation to stderr.  MSVA_LOG_LEVEL
 controls its verbosity, and should be one of (in increasing
 verbosity): silent, quiet, fatal, error, info, verbose, debug, debug1,
-debug2, debug3.  Default is 'info'.
+debug2, debug3.  Default is 'error'.
 
 =item MSVA_ALLOWED_USERS
 
