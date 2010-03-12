@@ -94,13 +94,20 @@ use strict;
   sub new {
     my $class = shift;
 
-    my $port = 8901;
+    my $port = 0;
     if (exists $ENV{MSVA_PORT}) {
       $port = $ENV{MSVA_PORT} + 0;
       die sprintf("not a reasonable port %d", $port) if (($port >= 65536) || $port <= 0);
     }
     # start the server on port 8901
     my $self = $class->SUPER::new($port);
+    if (! exists $ENV{MSVA_PORT}) {
+      # we can't pass port 0 to the constructor because it evaluates
+      # to false, so HTTP::Server::Simple just uses its internal
+      # default of 8080.  But if we want to select an arbitrary open
+      # port, we *can* set it here.
+      $self->port(0);
+    }
 
     $self->{allowed_uids} = {};
     if (exists $ENV{MSVA_ALLOWED_USERS}) {
@@ -411,6 +418,26 @@ use strict;
 
   sub post_bind_hook {
     my $self = shift;
+    my $server = shift;
+
+    my $socketcount = @{ $server->{server}->{sock} };
+    if ( $socketcount != 1 ) {
+      msvalog('error', "%d sockets open; should have been 1.", $socketcount);
+      $server->set_exit_status(10);
+      $server->server_close();
+    }
+    my $port = @{ $server->{server}->{sock} }[0]->sockport();
+    if ((! defined $port) || ($port < 1) || ($port >= 65536)) {
+      msvalog('error', "got nonsense port: %d.", $port);
+      $server->set_exit_status(11);
+      $server->server_close();
+    }
+    if ((exists $ENV{MSVA_PORT}) && (($ENV{MSVA_PORT} + 0) != $port)) {
+      msvalog('error', "Explicitly requested port %d, but got port: %d.", ($ENV{MSVA_PORT}+0), $port);
+      $server->set_exit_status(13);
+      $server->server_close();
+    }
+    $self->port($port);
 
     my $argcount = @ARGV;
     if ($argcount) {
@@ -522,7 +549,8 @@ of local users (by name or user ID) who are allowed to connect.
 =item MSVA_PORT
 
 msva-perl listens on a local TCP socket to facilitate access.  You can
-choose what port to bind to by setting MSVA_PORT.  Default is 8901.
+choose what port to bind to by setting MSVA_PORT.  Default is to bind
+on an arbitrary open port.
 
 =back
 

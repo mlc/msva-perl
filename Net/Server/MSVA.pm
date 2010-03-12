@@ -31,7 +31,7 @@
     my $self = shift;
     # if we got here, then the binding was successful.
     $exit_status = 0;
-    $msva->post_bind_hook(@_);
+    $msva->post_bind_hook($self, @_);
   }
 
   sub set_exit_status {
