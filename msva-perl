@@ -46,17 +46,19 @@ use strict;
                                    },
                  );
 
+# Net::Server log_level goes from 0 to 4
+# this is scaled to match.
   my %loglevels = (
-                   'silent' => 1,
-                   'quiet' => 2,
-                   'fatal' => 3,
-                   'error' => 4,
-                   'info' => 5,
-                   'verbose' => 6,
-                   'debug' => 7,
-                   'debug1' => 7,
-                   'debug2' => 8,
-                   'debug3' => 9,
+                   'silent' => 0,
+                   'quiet' => 0.25,
+                   'fatal' => 0.5,
+                   'error' => 1,
+                   'info' => 2,
+                   'verbose' => 3,
+                   'debug' => 4,
+                   'debug1' => 4,
+                   'debug2' => 5,
+                   'debug3' => 6,
                   );
 
   my $rsa_decoder = Convert::ASN1->new;
@@ -78,6 +80,12 @@ use strict;
       printf STDERR @_;
     }
   };
+
+  sub get_log_level {
+    my $level = $loglevels{lc($ENV{MSVA_LOG_LEVEL})};
+    $level = $loglevels{info} if (! defined $level);
+    return $level;
+  }
 
   sub net_server {
     return 'Net::Server::MSVA';
@@ -425,7 +433,7 @@ use strict;
             push @args, untaint($_);
           }
           $ENV{MONKEYSPHERE_VALIDATION_AGENT_SOCKET} = sprintf('http://localhost:%d', $self->port);
-          exec(@args) or die;
+          exec(@args) or exit 111;
         }
       }
     };
@@ -441,7 +449,10 @@ use strict;
 }
 
 my $server = MSVA->new();
-$server->run(host=>'localhost', msva=>$server);
+$server->run(host=>'localhost',
+             log_level=>MSVA::get_log_level(),
+             user => $>,  # explicitly choose regular user (avoids a warning)
+             msva=>$server);
 __END__
 
 =head1 NAME
