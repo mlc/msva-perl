@@ -1,1 +1,2 @@
 msva-perl usr/bin
+Net/Server/MSVA.pm usr/share/perl5/Net/Server
