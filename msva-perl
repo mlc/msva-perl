@@ -380,8 +380,11 @@ use strict;
     my $pid = shift;
     my $server = shift;
 
+    msvalog('debug', "Subprocess %d terminated.\n", $pid);
+
     if (exists $self->{child_pid} &&
-        $self->{child_pid} == $pid) {
+        ($self->{child_pid} == 0 ||
+         $self->{child_pid} == $pid)) {
       my $exitstatus = POSIX::WEXITSTATUS($?);
       msvalog('verbose', "Subprocess %d terminated; exiting %d.\n", $pid, $exitstatus);
       $server->set_exit_status($exitstatus);
@@ -403,14 +406,16 @@ use strict;
 
     my $argcount = @ARGV;
     if ($argcount) {
+      $self->{child_pid} = 0; # indicate that we are planning to fork.
       my $fork = fork();
       if (! defined $fork) {
         msvalog('error', "could not fork\n");
       } else {
         if ($fork) {
+          msvalog('debug', "Child process has PID %d\n", $fork);
           $self->{child_pid} = $fork;
         } else {
-          msvalog('verbose', "Executing: \n");
+          msvalog('verbose', "PID %d executing: \n", $$);
           for my $arg (@ARGV) {
             msvalog('verbose', " %s\n", $arg);
           }
@@ -420,7 +425,7 @@ use strict;
             push @args, untaint($_);
           }
           $ENV{MONKEYSPHERE_VALIDATION_AGENT_SOCKET} = sprintf('http://localhost:%d', $self->port);
-          exec(@args);
+          exec(@args) or die;
         }
       }
     };
