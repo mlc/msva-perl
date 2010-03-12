@@ -23,10 +23,14 @@
 
   my $msva;
   my $oldsighdlr;
-  my $exit_status = 0;
+  # guarantee initial failure -- this will be cleared after we bind
+  # successfully.
+  my $exit_status = 13;
 
   sub post_bind_hook {
     my $self = shift;
+    # if we got here, then the binding was successful.
+    $exit_status = 0;
     $msva->post_bind_hook(@_);
   }
 
