@@ -1,0 +1,16 @@
+#!/bin/sh
+
+# this script exists so that you can launch the msva-perl directly
+# from your development environment without having to install
+# anything.
+
+# it appears to be necessary because of some weirdness in how
+# HTTP::Server::Simple interacts with Net::Server -- otherwise, i
+# wouldn't need to shuffle all these files around.
+
+# Author: Daniel Kahn Gillmor <dkg@fifthhorseman.net>
+# Date: 2010-03-11 14:53:07-0500
+
+dir=$(dirname "$0")
+exec perl -wT -I"$dir" "$dir"/msva-perl "$@"
+

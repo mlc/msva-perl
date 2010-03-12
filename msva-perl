@@ -19,8 +19,7 @@
 use warnings;
 use strict;
 
-{
-  package MSVA;
+{ package MSVA;
 
   use parent qw(HTTP::Server::Simple::CGI);
   require Crypt::X509;
@@ -29,7 +28,6 @@ use strict;
   use IO::Socket;
   use IO::File;
   use Socket;
-  use Net::Server::Fork;
 
   use JSON;
   use POSIX qw(strftime);
@@ -48,17 +46,19 @@ use strict;
                                    },
                  );
 
+# Net::Server log_level goes from 0 to 4
+# this is scaled to match.
   my %loglevels = (
-                   'silent' => 1,
-                   'quiet' => 2,
-                   'fatal' => 3,
-                   'error' => 4,
-                   'info' => 5,
-                   'verbose' => 6,
-                   'debug' => 7,
-                   'debug1' => 7,
-                   'debug2' => 8,
-                   'debug3' => 9,
+                   'silent' => 0,
+                   'quiet' => 0.25,
+                   'fatal' => 0.5,
+                   'error' => 1,
+                   'info' => 2,
+                   'verbose' => 3,
+                   'debug' => 4,
+                   'debug1' => 4,
+                   'debug2' => 5,
+                   'debug3' => 6,
                   );
 
   my $rsa_decoder = Convert::ASN1->new;
@@ -74,27 +74,40 @@ use strict;
     my $msglevel = shift;
 
     my $level = $loglevels{lc($ENV{MSVA_LOG_LEVEL})};
-    $level = $loglevels{info} if (! defined $level);
+    $level = $loglevels{error} if (! defined $level);
 
     if ($loglevels{lc($msglevel)} <= $level) {
       printf STDERR @_;
     }
   };
 
+  sub get_log_level {
+    my $level = $loglevels{lc($ENV{MSVA_LOG_LEVEL})};
+    $level = $loglevels{error} if (! defined $level);
+    return $level;
+  }
+
   sub net_server {
-    return 'Net::Server::Fork';
+    return 'Net::Server::MSVA';
   };
 
   sub new {
     my $class = shift;
 
-    my $port = 8901;
+    my $port = 0;
     if (exists $ENV{MSVA_PORT}) {
       $port = $ENV{MSVA_PORT} + 0;
       die sprintf("not a reasonable port %d", $port) if (($port >= 65536) || $port <= 0);
     }
     # start the server on port 8901
     my $self = $class->SUPER::new($port);
+    if (! exists $ENV{MSVA_PORT}) {
+      # we can't pass port 0 to the constructor because it evaluates
+      # to false, so HTTP::Server::Simple just uses its internal
+      # default of 8080.  But if we want to select an arbitrary open
+      # port, we *can* set it here.
+      $self->port(0);
+    }
 
     $self->{allowed_uids} = {};
     if (exists $ENV{MSVA_ALLOWED_USERS}) {
@@ -377,6 +390,87 @@ use strict;
     return $status, $ret;
   }
 
+  sub child_dies {
+    my $self = shift;
+    my $pid = shift;
+    my $server = shift;
+
+    msvalog('debug', "Subprocess %d terminated.\n", $pid);
+
+    if (exists $self->{child_pid} &&
+        ($self->{child_pid} == 0 ||
+         $self->{child_pid} == $pid)) {
+      my $exitstatus = POSIX::WEXITSTATUS($?);
+      msvalog('verbose', "Subprocess %d terminated; exiting %d.\n", $pid, $exitstatus);
+      $server->set_exit_status($exitstatus);
+      $server->server_close();
+    }
+  }
+
+  # use sparingly!  We want to keep taint mode around for the data we
+  # get over the network.  this is only here because we want to treat
+  # the command line arguments differently for the subprocess.
+  sub untaint {
+    my $x = shift;
+    $x =~ /^(.*)$/ ;
+    return $1;
+  }
+
+  sub post_bind_hook {
+    my $self = shift;
+    my $server = shift;
+
+    my $socketcount = @{ $server->{server}->{sock} };
+    if ( $socketcount != 1 ) {
+      msvalog('error', "%d sockets open; should have been 1.", $socketcount);
+      $server->set_exit_status(10);
+      $server->server_close();
+    }
+    my $port = @{ $server->{server}->{sock} }[0]->sockport();
+    if ((! defined $port) || ($port < 1) || ($port >= 65536)) {
+      msvalog('error', "got nonsense port: %d.", $port);
+      $server->set_exit_status(11);
+      $server->server_close();
+    }
+    if ((exists $ENV{MSVA_PORT}) && (($ENV{MSVA_PORT} + 0) != $port)) {
+      msvalog('error', "Explicitly requested port %d, but got port: %d.", ($ENV{MSVA_PORT}+0), $port);
+      $server->set_exit_status(13);
+      $server->server_close();
+    }
+    $self->port($port);
+
+    my $argcount = @ARGV;
+    if ($argcount) {
+      $self->{child_pid} = 0; # indicate that we are planning to fork.
+      my $fork = fork();
+      if (! defined $fork) {
+        msvalog('error', "could not fork\n");
+      } else {
+        if ($fork) {
+          msvalog('debug', "Child process has PID %d\n", $fork);
+          $self->{child_pid} = $fork;
+        } else {
+          msvalog('verbose', "PID %d executing: \n", $$);
+          for my $arg (@ARGV) {
+            msvalog('verbose', " %s\n", $arg);
+          }
+          $ENV{PATH} = untaint($ENV{PATH});
+          my @args;
+          foreach (@ARGV) {
+            push @args, untaint($_);
+          }
+          $ENV{MONKEYSPHERE_VALIDATION_AGENT_SOCKET} = sprintf('http://localhost:%d', $self->port);
+          exec(@args) or exit 111;
+        }
+      }
+    } else {
+      printf("MONKEYSPHERE_VALIDATION_AGENT_SOCKET=http://localhost:%d;\nexport MONKEYSPHERE_VALIDATION_AGENT_SOCKET;\n", $self->port);
+      # FIXME: consider daemonizing here to behave more like
+      # ssh-agent.  maybe avoid backgrounding by setting
+      # MSVA_NO_BACKGROUND.
+    };
+  }
+
   sub extracerts {
     my $data = shift;
 
@@ -387,7 +481,11 @@ use strict;
 }
 
 my $server = MSVA->new();
-$server->run(host=>'localhost');
+$server->run(host=>'localhost',
+             log_level=>MSVA::get_log_level(),
+             user => $>,  # explicitly choose regular user and group (avoids spew)
+             group => $),
+             msva=>$server);
 __END__
 
 =head1 NAME
@@ -396,7 +494,7 @@ msva-perl - Perl implementation of a Monkeysphere Validation Agent
 
 =head1 SYNOPSIS
 
-  msva-perl
+  msva-perl [ COMMAND [ ARGS ... ] ]
 
 =head1 ABSTRACT
 
@@ -420,6 +518,19 @@ context.
 msva-perl relies on monkeysphere(1), which uses the user's OpenPGP web
 of trust to validate the peer's use of public keys.
 
+=head1 USAGE
+
+Launched with no arguments, msva-perl simply runs and listens forever.
+
+Launched with arguments, it sets up a listener, spawns a subprocess
+using the supplied command and arguments, but with the
+MONKEYSPHERE_VALIDATION_AGENT_SOCKET environment variable set to refer
+to its listener.  When the subprocess terminates, msva-perl tears down
+the listener and exits as well, returning the same value as the
+subprocess.
+
+This is a similar invocation pattern to that of ssh-agent(1).
+
 =head1 ENVIRONMENT VARIABLES
 
 msva-perl is configured by means of environment variables.
@@ -431,7 +542,7 @@ msva-perl is configured by means of environment variables.
 msva-perl logs messages about its operation to stderr.  MSVA_LOG_LEVEL
 controls its verbosity, and should be one of (in increasing
 verbosity): silent, quiet, fatal, error, info, verbose, debug, debug1,
-debug2, debug3.  Default is 'info'.
+debug2, debug3.  Default is 'error'.
 
 =item MSVA_ALLOWED_USERS
 
@@ -444,7 +555,8 @@ of local users (by name or user ID) who are allowed to connect.
 =item MSVA_PORT
 
 msva-perl listens on a local TCP socket to facilitate access.  You can
-choose what port to bind to by setting MSVA_PORT.  Default is 8901.
+choose what port to bind to by setting MSVA_PORT.  Default is to bind
+on an arbitrary open port.
 
 =back
 
@@ -466,7 +578,7 @@ MSVA_ALLOWED_USERS above).
 
 =head1 SEE ALSO
 
-monkeysphere(1), monkeysphere(7)
+monkeysphere(1), monkeysphere(7), ssh-agent(1)
 
 =head1 BUGS AND FEEDBACK
 
