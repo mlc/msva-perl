@@ -19,6 +19,7 @@ Depends: monkeysphere,
  libjson-perl,
  ${misc:Depends}
 Provides: monkeysphere-validation-agent
+Enhances: monkeysphere
 Description: Cryptographic identity validation agent (Perl implementation)
  The Monkeysphere Validation Agent offers a local service for tools to
  validate certificates (both X.509 and OpenPGP) and other public keys.
