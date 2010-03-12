@@ -19,10 +19,8 @@
 { package Net::Server::MSVA;
   use strict;
   use base qw(Net::Server::Fork);
-  use Net::Server::SIG qw(register_sig);
 
   my $msva;
-  my $oldsighdlr;
   # guarantee initial failure -- this will be cleared after we bind
   # successfully.
   my $exit_status = 13;
@@ -42,7 +40,6 @@
   # FIXME: this is an override of an undocumented interface of
   # Net::Server.  it would be better to use a documented hook, if
   # https://rt.cpan.org/Public/Bug/Display.html?id=55485 was resolved
-
   sub delete_child {
     my $self = shift;
     my $pid = shift;
@@ -59,16 +56,9 @@
   sub run {
     my $self = shift;
     my $options = { @_ };
-
-#  check_for_dequeue=>10, max_dequeue=>1
-
     if (exists $options->{msva}) {
       $msva = $options->{msva};
     };
-#    $oldsighdlr = $NET::Server::SIG::_SIG_SUB{CHLD};
-#    register_sig(USR2 => \&child_dies,
-#                 CHLD => \&child_dies);
-
     $self->SUPER::run(@_);
   }
 
