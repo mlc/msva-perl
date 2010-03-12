@@ -19,8 +19,7 @@
 use warnings;
 use strict;
 
-{
-  package MSVA;
+{ package MSVA;
 
   use parent qw(HTTP::Server::Simple::CGI);
   require Crypt::X509;
@@ -29,7 +28,6 @@ use strict;
   use IO::Socket;
   use IO::File;
   use Socket;
-  use Net::Server::Fork;
 
   use JSON;
   use POSIX qw(strftime);
@@ -82,7 +80,7 @@ use strict;
   };
 
   sub net_server {
-    return 'Net::Server::Fork';
+    return 'Net::Server::MSVA';
   };
 
   sub new {
@@ -377,6 +375,57 @@ use strict;
     return $status, $ret;
   }
 
+  sub child_dies {
+    my $self = shift;
+    my $pid = shift;
+    my $server = shift;
+
+    if (exists $self->{child_pid} &&
+        $self->{child_pid} == $pid) {
+      my $exitstatus = POSIX::WEXITSTATUS($?);
+      msvalog('verbose', "Subprocess %d terminated; exiting %d.\n", $pid, $exitstatus);
+      $server->set_exit_status($exitstatus);
+      $server->server_close();
+    }
+  }
+
+  # use sparingly!  We want to keep taint mode around for the data we
+  # get over the network.  this is only here because we want to treat
+  # the command line arguments differently for the subprocess.
+  sub untaint {
+    my $x = shift;
+    $x =~ /^(.*)$/ ;
+    return $1;
+  }
+
+  sub post_bind_hook {
+    my $self = shift;
+
+    my $argcount = @ARGV;
+    if ($argcount) {
+      my $fork = fork();
+      if (! defined $fork) {
+        msvalog('error', "could not fork\n");
+      } else {
+        if ($fork) {
+          $self->{child_pid} = $fork;
+        } else {
+          msvalog('verbose', "Executing: \n");
+          for my $arg (@ARGV) {
+            msvalog('verbose', " %s\n", $arg);
+          }
+          $ENV{PATH} = untaint($ENV{PATH});
+          my @args;
+          foreach (@ARGV) {
+            push @args, untaint($_);
+          }
+          $ENV{MONKEYSPHERE_VALIDATION_AGENT_SOCKET} = sprintf('http://localhost:%d', $self->port);
+          exec(@args);
+        }
+      }
+    };
+  }
+
   sub extracerts {
     my $data = shift;
 
@@ -387,7 +436,7 @@ use strict;
 }
 
 my $server = MSVA->new();
-$server->run(host=>'localhost');
+$server->run(host=>'localhost', msva=>$server);
 __END__
 
 =head1 NAME
@@ -396,7 +445,7 @@ msva-perl - Perl implementation of a Monkeysphere Validation Agent
 
 =head1 SYNOPSIS
 
-  msva-perl
+  msva-perl [ COMMAND [ ARGS ... ] ]
 
 =head1 ABSTRACT
 
@@ -419,6 +468,19 @@ context.
 
 msva-perl relies on monkeysphere(1), which uses the user's OpenPGP web
 of trust to validate the peer's use of public keys.
+
+=head1 USAGE
+
+Launched with no arguments, msva-perl simply runs and listens forever.
+
+Launched with arguments, it sets up a listener, spawns a subprocess
+using the supplied command and arguments, but with the
+MONKEYSPHERE_VALIDATION_AGENT_SOCKET environment variable set to refer
+to its listener.  When the subprocess terminates, msva-perl tears down
+the listener and exits as well, returning the same value as the
+subprocess.
+
+This is a similar invocation pattern to that of ssh-agent(1).
 
 =head1 ENVIRONMENT VARIABLES
 
@@ -466,7 +528,7 @@ MSVA_ALLOWED_USERS above).
 
 =head1 SEE ALSO
 
-monkeysphere(1), monkeysphere(7)
+monkeysphere(1), monkeysphere(7), ssh-agent(1)
 
 =head1 BUGS AND FEEDBACK
 
