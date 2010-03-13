@@ -99,7 +99,7 @@ use strict;
       $port = $ENV{MSVA_PORT} + 0;
       die sprintf("not a reasonable port %d", $port) if (($port >= 65536) || $port <= 0);
     }
-    # start the server on port 8901
+    # start the server on requested port
     my $self = $class->SUPER::new($port);
     if (! exists $ENV{MSVA_PORT}) {
       # we can't pass port 0 to the constructor because it evaluates
@@ -483,8 +483,8 @@ use strict;
 my $server = MSVA->new();
 $server->run(host=>'localhost',
              log_level=>MSVA::get_log_level(),
-             user => $>,  # explicitly choose regular user and group (avoids spew)
-             group => $),
+             user => POSIX::geteuid(),  # explicitly choose regular user and group (avoids spew)
+             group => POSIX::getegid(),
              msva=>$server);
 __END__
 
