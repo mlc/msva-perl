@@ -1,7 +1,9 @@
-msva-perl (0.2~pre1) UNRELEASED;
+msva-perl (0.2) upstream;
 
   * can now be invoked with a sub-command; will run until subcommand
-    completes, and then terminate with the same return code.
+    completes, and then terminate with the same return code (this is
+    similar to the ssh-agent technique, and enables inclusion in
+    Xsession.d; see monkeysphere 0.29 package for automatic startup).
   * chooses arbitrary open port by default (can still be specified with
     MSVA_PORT environment variable)
   * minimized logging spew by default.
@@ -9,7 +11,7 @@ msva-perl (0.2~pre1) UNRELEASED;
     implementations)
   * cleanup Makefile and distribution strategies.
 
- -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Wed, 10 Mar 2010 02:41:19 -0500
+ -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Mon, 15 Mar 2010 14:25:42 -0400
 
 msva-perl (0.1) upstream;
 
