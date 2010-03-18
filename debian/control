@@ -17,6 +17,7 @@ Depends: monkeysphere,
  libnet-server-perl,
  libhttp-server-simple-perl,
  libjson-perl,
+ libparent-perl,
  ${misc:Depends}
 Provides: monkeysphere-validation-agent
 Enhances: monkeysphere
