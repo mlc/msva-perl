@@ -1,8 +1,8 @@
-msva-perl (0.2-2) UNRELEASED; urgency=low
+msva-perl (0.2-2) unstable; urgency=low
 
   * Add libparent-perl to Depends 
 
- -- Micah Anderson <micah@debian.org>  Thu, 18 Mar 2010 19:18:56 -0400
+ -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Thu, 18 Mar 2010 20:05:28 -0400
 
 msva-perl (0.2-1) unstable; urgency=low
 
