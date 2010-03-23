@@ -1,3 +1,10 @@
+msva-perl (0.3~pre-1) UNRELEASED; urgency=low
+
+  * New Upstream Release
+  * packaging re-organization
+
+ -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Tue, 23 Mar 2010 16:49:06 -0400
+
 msva-perl (0.2-2) unstable; urgency=low
 
   * Add libparent-perl to Depends 
