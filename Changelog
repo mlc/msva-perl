@@ -1,3 +1,9 @@
+msva-perl (0.3~pre) UNRELEASED;
+
+  * packaging re-organization
+
+ -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Tue, 23 Mar 2010 16:50:07 -0400
+
 msva-perl (0.2) upstream;
 
   * can now be invoked with a sub-command; will run until subcommand
