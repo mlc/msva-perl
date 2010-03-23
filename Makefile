@@ -22,6 +22,6 @@ debian-package:
 upstream-tag:
 	git tag -s msva-perl/$(VERSION) -m "releasing msva-perl version $(VERSION)"
 debian-tag:
-	git tag -s debian/$(DEBIAN_VERSION) -m "tagging msva-perl debian packaging version $(DEBIAN_VERSION)"
+	git tag -s msva-perl_debian/$(DEBIAN_VERSION) -m "tagging msva-perl debian packaging version $(DEBIAN_VERSION)"
 
 .PHONY: upstream-tag debian-package debian-tag all clean
