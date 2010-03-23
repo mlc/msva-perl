@@ -17,11 +17,11 @@ clean:
 	rm -f msva-perl.1
 
 debian-package:
-	git buildpackage -uc -us --git-upstream-branch=master --git-debian-branch=debian --git-no-pristine-tar
+	git buildpackage -uc -us
 
 upstream-tag:
 	git tag -s msva-perl/$(VERSION) -m "releasing msva-perl version $(VERSION)"
 debian-tag:
-	git tag -s debian/$(DEBIAN_VERSION) -m "tagging msva-perl debian packaging version $(DEBIAN_VERSION)"
+	git tag -s msva-perl_debian/$(DEBIAN_VERSION) -m "tagging msva-perl debian packaging version $(DEBIAN_VERSION)"
 
 .PHONY: upstream-tag debian-package debian-tag all clean
