@@ -324,12 +324,36 @@ use strict;
   }
 
 
+  sub getuid {
+    my $data = shift;
+    if ($data->{context} =~ /(https|ssh)/) {
+      $data->{context} = $1;
+    } else {
+      return [];
+    }
+    if ($data->{peer} =~ /(^[^\s]*$)/) {
+      $data->{peer} = $1;
+    } else {
+      return [];
+    }
+    return $data->{context}.'://'.$data->{peer};
+  }
 
   sub reviewcert {
     my $data  = shift;
     return if !ref $data;
 
-    my $uid = $data->{context}.'://'.$data->{peer};
+    my $status = '200 OK';
+    my $ret =  { valid => JSON::false,
+                 message => 'Unknown failure',
+               };
+
+    my $uid = getuid($data);
+    if ($uid eq []) {
+        msvalog('error', "invalid peer/context: %s/%s\n", $data->{context}, $data->{peer});
+        $ret->{message} = sprintf('invalid peer/context');
+        return $status, $ret;
+    }
 
     my $rawdata = join('', map(chr, @{$data->{pkc}->{data}}));
     my $cert = Crypt::X509->new(cert => $rawdata);
@@ -338,10 +362,6 @@ use strict;
     msvalog('verbose', "cert pubkey algo: %s\n", $cert->PubKeyAlg());
     msvalog('verbose', "cert pubkey: %s\n", unpack('H*', $cert->pubkey()));
 
-    my $status = '200 OK';
-    my $ret =  { valid => JSON::false,
-                 message => 'Unknown failure',
-               };
     if ($cert->PubKeyAlg() ne 'RSA') {
       $ret->{message} = sprintf('public key was algo "%s" (OID %s).  MSVA.pl only supports RSA',
                                 $cert->PubKeyAlg(), $cert->pubkey_algorithm);
