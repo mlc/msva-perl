@@ -470,6 +470,8 @@ use strict;
           foreach (@ARGV) {
             push @args, untaint($_);
           }
+          # restore default SIGCHLD handling:
+          $SIG{CHLD} = 'DEFAULT';
           $ENV{MONKEYSPHERE_VALIDATION_AGENT_SOCKET} = sprintf('http://localhost:%d', $self->port);
           exec(@args) or exit 111;
         }
