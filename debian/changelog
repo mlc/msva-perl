@@ -1,9 +1,10 @@
-msva-perl (0.3~pre-1) UNRELEASED; urgency=low
+msva-perl (0.3-1) unstable; urgency=low
 
-  * New Upstream Release
-  * packaging re-organization
+  * New Upstream Release:
+   - packaging re-organization
+   - restore default SIGCHLD handler for subprocesses (Closes: #585506)
 
- -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Tue, 23 Mar 2010 16:49:06 -0400
+ -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Wed, 16 Jun 2010 02:32:42 -0400
 
 msva-perl (0.2-2) unstable; urgency=low
 
