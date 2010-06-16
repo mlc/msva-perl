@@ -1,8 +1,10 @@
-msva-perl (0.3~pre) UNRELEASED;
+msva-perl (0.3) upstream;
 
   * packaging re-organization
+  * properly closing piped monkeysphere call
+  * restore default SIGCHLD handling for exec'ed subprocess (Closes: MS #2414)
 
- -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Tue, 23 Mar 2010 16:50:07 -0400
+ -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Wed, 16 Jun 2010 02:29:06 -0400
 
 msva-perl (0.2) upstream;
 

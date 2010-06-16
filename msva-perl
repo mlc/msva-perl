@@ -365,6 +365,7 @@ use strict;
           # clean up the path for taint-check mode:
           $ENV{PATH} = '/usr/local/bin:/usr/bin:/bin';
 
+          # FIXME: should test exit code of open() and do something intelligent with it.
           open($fh, '-|', 'monkeysphere', 'keys-for-userid', $uid);
           while(<$fh>) {
             my @keyinfo = parse_openssh_pubkey($_);
@@ -380,6 +381,16 @@ use strict;
               $ret->{message} = sprintf('Successfully validated "%s" through the OpenPGP Web of Trust.', $uid);
             }
           }
+          my $closeval = close($fh);
+          my $subproc_retval = POSIX::WEXITSTATUS($?);
+          if ((!$closeval) && ($! != 0)) {
+            msvalog('error', "Got bad errno from closing monkeysphere subprocess: %d \n", $!);
+          }
+          if ($subproc_retval != 0) {
+            msvalog('error', "Got bad return code from monkeysphere subprocess: %d \n", $subproc_retval);
+            # FIXME: marginal UI here?  do something with the return code?
+          }
+
         }
       } else {
         msvalog('error', "failed to decode %s\n", unpack('H*', $cert->pubkey()));
@@ -459,6 +470,8 @@ use strict;
           foreach (@ARGV) {
             push @args, untaint($_);
           }
+          # restore default SIGCHLD handling:
+          $SIG{CHLD} = 'DEFAULT';
           $ENV{MONKEYSPHERE_VALIDATION_AGENT_SOCKET} = sprintf('http://localhost:%d', $self->port);
           exec(@args) or exit 111;
         }
