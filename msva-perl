@@ -32,8 +32,12 @@ use strict;
 
   use JSON;
   use POSIX qw(strftime);
+  # we need the version of GnuPG::Interface that knows about pubkey_data, etc:
+  use GnuPG::Interface 0.42.02;
 
   my $version = '0.1';
+
+  my $gnupg = GnuPG::Interface->new();
 
   my %dispatch = (
                   '/' => { handler => \&noop,
@@ -324,6 +328,20 @@ use strict;
     }
   }
 
+  sub keycomp {
+    my $rsakey = shift;
+    my $gpgkey = shift;
+
+    if ($gpgkey->algo_num != 1) {
+      msvalog('verbose', "Monkeysphere only does RSA keys.  This key is algorithm #%d\n", $gpgkey->algo_num);
+    } else {
+      if ($rsakey->{exponent}->bcmp($gpgkey->pubkey_data->[1]) == 0 &&
+          $rsakey->{modulus}->bcmp($gpgkey->pubkey_data->[0]) == 0) {
+        return 1;
+      }
+    }
+    return 0;
+  }
 
   sub getuid {
     my $data = shift;
@@ -378,34 +396,42 @@ use strict;
         } else {
           $ret->{message} = sprintf('Failed to validate "%s" through the OpenPGP Web of Trust.', $uid);
 
-          my $fh;
-          # clean up the path for taint-check mode:
+          # needed because $gnupg spawns child processes
           $ENV{PATH} = '/usr/local/bin:/usr/bin:/bin';
-
-          # FIXME: should test exit code of open() and do something intelligent with it.
-          open($fh, '-|', 'monkeysphere', 'keys-for-userid', $uid);
-          while(<$fh>) {
-            my @keyinfo = parse_openssh_pubkey($_);
-            if (scalar(@keyinfo) != 3 || $keyinfo[0] ne "ssh-rsa") {
-              msvalog('info', "got unknown or non-RSA key from monkeysphere\n");
-              next;
+          # FIXME: check keyservers?
+          foreach my $gpgkey ($gnupg->get_public_keys('='.$uid)) {
+            my $notvalid = 1;
+            if ($gpgkey->usage_flags =~ /A/) {
+              # we're only interested in keys that might have a valid
+              # authentication key/subkey:
+              foreach my $tryuid ($gpgkey->user_ids) {
+                if ($tryuid->as_string eq $uid) {
+                  $notvalid = 0
+                    if ($tryuid->validity eq 'f' ||
+                        $tryuid->validity eq 'u');
+                }
+              }
+              if ($notvalid) {
+                msvalog('verbose', "got a key that was not fully-valid for UID %s\n", $uid);
+              } else {
+                if ($gpgkey->usage_flags =~ /a/) {
+                  msvalog('verbose', "primary key 0x%s is authentication-capable\n", $gpgkey->hex_id);
+                  if (keycomp($key, $gpgkey)) {
+                    msvalog('verbose', "...and it matches!\n");
+                    $ret->{valid} = JSON::true;
+                    $ret->{message} = sprintf('Successfully validated "%s" through the OpenPGP Web of Trust.', $uid);
+                  }
+                }
+                foreach my $subkey ($gpgkey->subkeys) {
+                  msvalog('verbose', "subkey 0x%s is authentication-capable\n", $subkey->hex_id);
+                  if (keycomp($key, $subkey)) {
+                    msvalog('verbose', "...and it matches!\n");
+                    $ret->{valid} = JSON::true;
+                    $ret->{message} = sprintf('Successfully validated "%s" through the OpenPGP Web of Trust.', $uid);
+                  }
+                }
+              }
             }
-            msvalog('verbose', "got good RSA key from monkeysphere: \nExponent: 0x%s\nModulus: 0x%s\n", unpack('H*', $keyinfo[1]), unpack('H*', $keyinfo[2]));
-            if ($key->{exponent}->bcmp(Math::BigInt->new('0x'.unpack('H*', $keyinfo[1]))) == 0 &&
-                $key->{modulus}->bcmp(Math::BigInt->new('0x'.unpack('H*', $keyinfo[2]))) == 0) {
-              msvalog('verbose', "...and it matches!\n");
-              $ret->{valid} = JSON::true;
-              $ret->{message} = sprintf('Successfully validated "%s" through the OpenPGP Web of Trust.', $uid);
-            }
-          }
-          my $closeval = close($fh);
-          my $subproc_retval = POSIX::WEXITSTATUS($?);
-          if ((!$closeval) && ($! != 0)) {
-            msvalog('error', "Got bad errno from closing monkeysphere subprocess: %d \n", $!);
-          }
-          if ($subproc_retval != 0) {
-            msvalog('error', "Got bad return code from monkeysphere subprocess: %d \n", $subproc_retval);
-            # FIXME: marginal UI here?  do something with the return code?
           }
 
         }
