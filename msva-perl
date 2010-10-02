@@ -23,6 +23,7 @@ use strict;
 
   use parent qw(HTTP::Server::Simple::CGI);
   require Crypt::X509;
+  use Regexp::Common qw /net/;
   use Convert::ASN1;
   use MIME::Base64;
   use IO::Socket;
@@ -326,17 +327,13 @@ use strict;
 
   sub getuid {
     my $data = shift;
-    if ($data->{context} =~ /(https|ssh)/) {
+    if ($data->{context} =~ /^(https|ssh)$/) {
       $data->{context} = $1;
-    } else {
-      return [];
+      if ($data->{peer} =~ /^($RE{net}{domain})$/) {
+        $data->{peer} = $1;
+        return $data->{context}.'://'.$data->{peer};
+      }
     }
-    if ($data->{peer} =~ /(^[^\s]*$)/) {
-      $data->{peer} = $1;
-    } else {
-      return [];
-    }
-    return $data->{context}.'://'.$data->{peer};
   }
 
   sub reviewcert {
