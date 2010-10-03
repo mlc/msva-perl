@@ -19,8 +19,10 @@
 use warnings;
 use strict;
 
+
 { package MSVA;
 
+use Data::Dumper;
   use parent qw(HTTP::Server::Simple::CGI);
   require Crypt::X509;
   use Regexp::Common qw /net/;
@@ -401,6 +403,7 @@ use strict;
           # FIXME: check keyservers?
           foreach my $gpgkey ($gnupg->get_public_keys('='.$uid)) {
             my $notvalid = 1;
+            my $marginal = 0;
             if ($gpgkey->usage_flags =~ /A/) {
               # we're only interested in keys that might have a valid
               # authentication key/subkey:
@@ -409,10 +412,15 @@ use strict;
                   $notvalid = 0
                     if ($tryuid->validity eq 'f' ||
                         $tryuid->validity eq 'u');
+                  $marginal = 1
+                    if ($tryuid->validity eq 'm');
                 }
               }
-              if ($notvalid) {
+              if ($marginal and $notvalid) {
+                # MJGOINS
+              } elsif ($notvalid) {
                 msvalog('verbose', "got a key that was not fully-valid for UID %s\n", $uid);
+                msvalog('debug', Dumper($gpgkey));
               } else {
                 if ($gpgkey->usage_flags =~ /a/) {
                   msvalog('verbose', "primary key 0x%s is authentication-capable\n", $gpgkey->hex_id);
