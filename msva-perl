@@ -23,7 +23,7 @@ use strict;
 { package MSVA;
 
 use Data::Dumper;
-use Crypt::Monkeysphere::MSVA::MarginalUI;
+  use Crypt::Monkeysphere::MSVA::MarginalUI;
   use parent qw(HTTP::Server::Simple::CGI);
   require Crypt::X509;
   use Regexp::Common qw /net/;
