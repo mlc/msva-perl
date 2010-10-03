@@ -32,7 +32,7 @@
                 <property name="can_focus">True</property>
                 <property name="receives_default">True</property>
                 <property name="use_stock">True</property>
-                <signal name="clicked" handler="on_yesButton_clicked"/>
+                <signal name="clicked" handler="Crypt::Monkeysphere::MSVA::MarginalUI::on_yesButton_clicked"/>
               </widget>
               <packing>
                 <property name="expand">False</property>
@@ -47,7 +47,7 @@
                 <property name="can_focus">True</property>
                 <property name="receives_default">True</property>
                 <property name="use_stock">True</property>
-                <signal name="clicked" handler="on_noButton_clicked" object="no"/>
+                <signal name="clicked" handler="Crypt::Monkeysphere::MSVA::MarginalUI::on_noButton_clicked" object="no"/>
               </widget>
               <packing>
                 <property name="expand">False</property>

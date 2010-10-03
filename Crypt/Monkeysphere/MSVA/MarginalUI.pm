@@ -9,6 +9,8 @@
 #
 #----------------------------------------------------------------------
 
+{ package MSVA::MarginalUI;
+
 use strict;
 use warnings;
 
@@ -19,7 +21,7 @@ my $glade;
 my $label;
 
 # populate UI from 
-$glade = Gtk2::GladeXML->new("marginalUI.glade");
+$glade = Gtk2::GladeXML->new("MSVA/MarginalUI.glade");
 
 # Connect the signals
 $glade->signal_autoconnect_from_package('main');
@@ -52,4 +54,8 @@ sub on_yesButton_clicked {
 }
 sub on_noButton_clicked {
     exit 1;
+}
+
+1;
+
 }
