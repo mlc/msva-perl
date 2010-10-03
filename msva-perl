@@ -363,7 +363,7 @@ use Data::Dumper;
 
   sub get_keyserver_policy {
     if (exists $ENV{MSVA_KEYSERVER_POLICY}) {
-      if ($ENV{MSVA_KEYSERVER_POLICY} =~ /^(always|never)$/) {
+      if ($ENV{MSVA_KEYSERVER_POLICY} =~ /^(always|never|unlessvalid)$/) {
         return $1;
       }
       msvalog('error', "Not a valid MSVA_KEYSERVER_POLICY):\n  %s\n", $ENV{MSVA_KEYSERVER_POLICY});
@@ -467,35 +467,34 @@ use Data::Dumper;
           # needed because $gnupg spawns child processes
           $ENV{PATH} = '/usr/local/bin:/usr/bin:/bin';
 
+          # fingerprints of keys that are not fully-valid for this User ID, but match
+          # the key from the queried certificate:
+          my @subvalid_key_fprs;
+
           while (1) {
             foreach my $gpgkey ($gnupg->get_public_keys('='.$uid)) {
-              my $notvalid = 1;
+              my $validity = '-';
               foreach my $tryuid ($gpgkey->user_ids) {
                 if ($tryuid->as_string eq $uid) {
-                  $notvalid = 0
-                    if ($tryuid->validity eq 'f' ||
-                        $tryuid->validity eq 'u');
+                  $validity = $tryuid->validity;
                 }
               }
-              if ($notvalid) {
-                msvalog('verbose', "got a key that was not fully-valid for UID %s\n", $uid);
-                msvalog('debug', Dumper($gpgkey));
-              } else {
-                $foundvalid = 1;
-                if ($gpgkey->usage_flags =~ /a/) {
-                  msvalog('verbose', "primary key 0x%s is authentication-capable\n", $gpgkey->hex_id);
-                  if (keycomp($key, $gpgkey)) {
-                    msvalog('verbose', "...and it matches!\n");
-                    $ret->{valid} = JSON::true;
-                    $ret->{message} = sprintf('Successfully validated "%s" through the OpenPGP Web of Trust.', $uid);
-                  }
-                }
-                foreach my $subkey ($gpgkey->subkeys) {
-                  msvalog('verbose', "subkey 0x%s is authentication-capable\n", $subkey->hex_id);
-                  if (keycomp($key, $subkey)) {
-                    msvalog('verbose', "...and it matches!\n");
-                    $ret->{valid} = JSON::true;
-                    $ret->{message} = sprintf('Successfully validated "%s" through the OpenPGP Web of Trust.', $uid);
+              # treat primary keys just like subkeys:
+              foreach my $subkey ($gpgkey, @{$gpgkey->subkeys}) {
+                my $primarymatch = keycomp($key, $subkey);
+                if ($primarymatch) {
+                  if ($subkey->usage_flags =~ /a/) {
+                    msvalog('verbose', "key matches, and 0x%s is authentication-capable\n", $subkey->hex_id);
+                    if ($validity =~ /^[fu]$/) {
+                      $foundvalid = 1;
+                      msvalog('verbose', "...and it matches!\n");
+                      $ret->{valid} = JSON::true;
+                      $ret->{message} = sprintf('Successfully validated "%s" through the OpenPGP Web of Trust.', $uid);
+                    } else {
+                      push(@subvalid_key_fprs, { fpr => $subkey->fingerprint, val => $validity }) if $lastloop;
+                    }
+                  } else {
+                    msvalog('verbose', "key matches, but 0x%s is not authentication-capable\n", $subkey->hex_id);
                   }
                 }
               }
@@ -503,9 +502,12 @@ use Data::Dumper;
             if ($lastloop) {
               last;
             } else {
-              fetch_uid_from_keyserver($uid);
+              fetch_uid_from_keyserver($uid) if (!$foundvalid);
               $lastloop = 1;
             }
+          }
+          foreach my $keyfpr (@subvalid_key_fprs) {
+            msvalog('verbose', "Found sub-valid key 0x%s (validity %s)\n", $keyfpr->{fpr}->as_hex_string, $keyfpr->{val});
           }
         }
       } else {
