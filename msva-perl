@@ -454,24 +454,18 @@ use strict;
           $ret->{message} = sprintf('public key size is less than 1000 bits (was: %d bits)', $cert->pubkey_size());
         } else {
           $ret->{message} = sprintf('Failed to validate "%s" through the OpenPGP Web of Trust.', $uid);
-          my $ks_checked = 0;
+          my $lastloop = 0;
           if (get_keyserver_policy() eq 'always') {
             fetch_uid_from_keyserver($uid);
-            $ks_checked = 1;
+            $lastloop = 1;
+          } elsif (get_keyserver_policy() eq 'never') {
+            $lastloop = 1;
           }
-          my $afterlocalpass = 0;
           my $foundvalid = 0;
           # needed because $gnupg spawns child processes
           $ENV{PATH} = '/usr/local/bin:/usr/bin:/bin';
 
           while (1) {
-
-            if ($afterlocalpass) {
-              # while loop termination condition:
-              last if ($foundvalid || $ks_checked || get_keyserver_policy() eq 'never');
-              fetch_uid_from_keyserver($uid);
-              $ks_checked = 1;
-            }
             foreach my $gpgkey ($gnupg->get_public_keys('='.$uid)) {
               my $notvalid = 1;
               foreach my $tryuid ($gpgkey->user_ids) {
@@ -503,7 +497,12 @@ use strict;
                 }
               }
             }
-            $afterlocalpass = 1;
+            if ($lastloop) {
+              last;
+            } else {
+              fetch_uid_from_keyserver($uid);
+              $lastloop = 1;
+            }
           }
         }
       } else {
