@@ -1,3 +1,11 @@
+msva-perl (0.4~pre) upstream;
+
+  * removed dependency on monkeysphere package -- just invoke GnuPG
+    directly (needs GnuPG::Interface, Regexp::Common)
+  * adds MSVA_KEYSERVER_POLICY and MSVA_KEYSERVER environment variables.
+
+ -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Sat, 02 Oct 2010 23:54:11 -0400
+
 msva-perl (0.3) upstream;
 
   * packaging re-organization

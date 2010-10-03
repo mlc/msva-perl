@@ -41,6 +41,8 @@ use Data::Dumper;
   my $version = '0.1';
 
   my $gnupg = GnuPG::Interface->new();
+  $gnupg->options->quiet(1);
+  $gnupg->options->batch(1);
 
   my %dispatch = (
                   '/' => { handler => \&noop,
@@ -53,6 +55,9 @@ use Data::Dumper;
                                      methods => { 'POST' => 1 },
                                    },
                  );
+
+  my $default_keyserver = 'hkp://pool.sks-keyservers.net';
+  my $default_keyserver_policy = 'unlessvalid';
 
 # Net::Server log_level goes from 0 to 4
 # this is scaled to match.
@@ -357,6 +362,60 @@ use Data::Dumper;
     }
   }
 
+  sub get_keyserver_policy {
+    if (exists $ENV{MSVA_KEYSERVER_POLICY}) {
+      if ($ENV{MSVA_KEYSERVER_POLICY} =~ /^(always|never)$/) {
+        return $1;
+      }
+      msvalog('error', "Not a valid MSVA_KEYSERVER_POLICY):\n  %s\n", $ENV{MSVA_KEYSERVER_POLICY});
+    }
+    return $default_keyserver_policy;
+  }
+
+  sub get_keyserver {
+    # We should read from (first hit wins):
+    # the environment
+    if (exists $ENV{MSVA_KEYSERVER}) {
+      if ($ENV{MSVA_KEYSERVER} =~ /^((hkps?|finger|ldap):\/\/)?$RE{net}{domain}$/) {
+        return $1;
+      }
+      msvalog('error', "Not a valid keyserver (from MSVA_KEYSERVER):\n  %s\n", $ENV{MSVA_KEYSERVER});
+    }
+
+    # FIXME: some msva.conf file (system and user?)
+    # FIXME: the relevant gnupg.conf instead?
+
+    # the default_keyserver
+    return $default_keyserver;
+  }
+
+  sub fetch_uid_from_keyserver {
+    my $uid = shift;
+
+    my $cmd = IO::Handle->new();
+    my $out = IO::Handle->new();
+    my $nul = IO::File->new("< /dev/null");
+
+    msvalog('debug', "start ks query for UserID: %s", $uid);
+    my $pid = $gnupg->wrap_call
+      ( handles => GnuPG::Handles->new( command => $cmd, stdout => $out, stderr => $nul ),
+        command_args => [ '='.$uid ],
+        commands => [ '--keyserver',
+                      get_keyserver(),
+                      qw( --no-tty --with-colons --search ) ]
+      );
+    while (my $line = $out->getline()) {
+      msvalog('debug', "from ks query: (%d) %s", $cmd->fileno, $line);
+      if ($line =~ /^info:(\d+):(\d+)/ ) {
+        $cmd->print(join(' ', ($1..$2))."\n");
+        msvalog('debug', 'to ks query: '.join(' ', ($1..$2))."\n");
+      }
+    }
+    # FIXME: can we do something to avoid hanging forever?
+    waitpid($pid, 0);
+    msvalog('debug', "ks query returns %d\n", POSIX::WEXITSTATUS($?));
+  }
+
   sub reviewcert {
     my $data  = shift;
     return if !ref $data;
@@ -398,16 +457,25 @@ use Data::Dumper;
           $ret->{message} = sprintf('public key size is less than 1000 bits (was: %d bits)', $cert->pubkey_size());
         } else {
           $ret->{message} = sprintf('Failed to validate "%s" through the OpenPGP Web of Trust.', $uid);
-
+          my $ks_checked = 0;
+          if (get_keyserver_policy() eq 'always') {
+            fetch_uid_from_keyserver($uid);
+            $ks_checked = 1;
+          }
+          my $afterlocalpass = 0;
+          my $foundvalid = 0;
           # needed because $gnupg spawns child processes
           $ENV{PATH} = '/usr/local/bin:/usr/bin:/bin';
-          # FIXME: check keyservers?
-          foreach my $gpgkey ($gnupg->get_public_keys('='.$uid)) {
-            my $notvalid = 1;
-            my $marginal = 0;
-            if ($gpgkey->usage_flags =~ /A/) {
-              # we're only interested in keys that might have a valid
-              # authentication key/subkey:
+          while (1) {
+            if ($afterlocalpass) {
+              # while loop termination condition:
+              last if ($foundvalid || $ks_checked || get_keyserver_policy() eq 'never');
+              fetch_uid_from_keyserver($uid);
+              $ks_checked = 1;
+            }
+            foreach my $gpgkey ($gnupg->get_public_keys('='.$uid)) {
+              my $notvalid = 1;
+              my $marginal = 0;
               foreach my $tryuid ($gpgkey->user_ids) {
                 if ($tryuid->as_string eq $uid) {
                   $notvalid = 0
@@ -423,6 +491,7 @@ use Data::Dumper;
                 msvalog('verbose', "got a key that was not fully-valid for UID %s\n", $uid);
                 msvalog('debug', Dumper($gpgkey));
               } else {
+                $foundvalid = 1;
                 if ($gpgkey->usage_flags =~ /a/) {
                   msvalog('verbose', "primary key 0x%s is authentication-capable\n", $gpgkey->hex_id);
                   if (keycomp($key, $gpgkey)) {
@@ -441,8 +510,8 @@ use Data::Dumper;
                 }
               }
             }
+            $afterlocalpass = 1;
           }
-
         }
       } else {
         msvalog('error', "failed to decode %s\n", unpack('H*', $cert->pubkey()));
@@ -622,6 +691,22 @@ of local users (by name or user ID) who are allowed to connect.
 msva-perl listens on a local TCP socket to facilitate access.  You can
 choose what port to bind to by setting MSVA_PORT.  Default is to bind
 on an arbitrary open port.
+
+=item MSVA_KEYSERVER
+
+msva-perl will request information from OpenPGP keyservers.  Set
+MSVA_KEYSERVER to declare the keyserver you want it to check with.
+Default is 'hkp://pool.sks-keyservers.net'.
+
+=item MSVA_KEYSERVER_POLICY
+
+msva-perl must decide when to check with keyservers (for new keys,
+revocation certificates, new certifications, etc).  There are three
+possible options: 'always' means to check with the keyserver on every
+query it receives.  'never' means to never check with a
+keyserver. 'unlessvalid' will only check with the keyserver on a
+specific query if no keys are already locally known to be valid for
+the requested peer.  Default is 'unlessvalid'.
 
 =back
 
