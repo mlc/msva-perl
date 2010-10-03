@@ -9,7 +9,7 @@
 #
 #----------------------------------------------------------------------
 
-{ package MSVA::MarginalUI;
+{ package Crypt::Monkeysphere::MSVA::MarginalUI;
 
 use strict;
 use warnings;
@@ -21,7 +21,7 @@ my $glade;
 my $label;
 
 # populate UI from 
-$glade = Gtk2::GladeXML->new("MSVA/MarginalUI.glade");
+$glade = Gtk2::GladeXML->new("Crypt/Monkeysphere/MSVA/MarginalUI.glade");
 
 # Connect the signals
 $glade->signal_autoconnect_from_package('main');
