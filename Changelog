@@ -1,9 +1,10 @@
 msva-perl (0.4~pre) upstream;
 
   * removed dependency on monkeysphere package -- just invoke GnuPG
-    directly (needs GnuPG::Interface, Regexp::Common)
+    directly (needs GnuPG::Interface, Regexp::Common) (closes MS #2034)
   * adds MSVA_KEYSERVER_POLICY and MSVA_KEYSERVER environment variables.
-  * added a marginal UI (needs Gtk2 perl module)
+  * added a marginal UI (needs Gtk2 perl module) (closes MS #2004)
+  * untaint input uids (closes MS #2270)
 
  -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Sat, 02 Oct 2010 23:54:11 -0400
 
