@@ -16,6 +16,17 @@
 
 { package Crypt::Monkeysphere::MSVA;
 
+  use strict;
+  use warnings;
+
+  BEGIN {
+    use Exporter   ();
+    our (@EXPORT_OK,@ISA);
+    @ISA = qw(Exporter);
+    @EXPORT_OK = qw( &msvalog );
+  }
+  our @EXPORT_OK;
+
   use Crypt::Monkeysphere::MSVA::MarginalUI;
   use parent qw(HTTP::Server::Simple::CGI);
   require Crypt::X509;
@@ -500,85 +511,14 @@
               $lastloop = 1;
             }
           }
-          msvalog('debug', "%d subvalid_key_fprs\n", $#subvalid_key_fprs+1);
-          foreach my $keyfpr (@subvalid_key_fprs) {
-            my $fprx = sprintf('0x%.40s', $keyfpr->{fpr}->as_hex_string);
-            msvalog('debug', "checking on %s\n", $fprx);
-            foreach my $gpgkey ($gnupg->get_public_keys_with_sigs($fprx)) {
-              msvalog('debug', "found key %.40s\n", $gpgkey->fingerprint->as_hex_string);
-              # we're going to prompt the user here if we have any
-              # relevant certifiers:
-              my @valid_certifiers;
-              my @marginal_certifiers;
 
-              # FIXME: if there are multiple keys in the OpenPGP WoT
-              # with the same key material and the same User ID
-              # attached, we'll be throwing multiple prompts per
-              # query.  That's a mess, but i'm not sure what the
-              # better thing to do is.
-              foreach my $user_id ($gpgkey->user_ids) {
-                msvalog('debug', "found EE User ID %s\n", $user_id->as_string);
-                if ($user_id->as_string eq $uid) {
-                  # get a list of the certifiers of the relevant User ID for the key
-                  foreach my $cert (@{$user_id->signatures}) {
-                    if ($cert->hex_id =~ /^([A-Fa-f0-9]{16})$/) {
-                      my $certid = $1;
-                      msvalog('debug', "found certifier 0x%.16s\n", $certid);
-                      if ($cert->is_valid()) {
-                        foreach my $certifier ($gnupg->get_public_keys(sprintf('0x%.40s!', $certid))) {
-                          my $valid_cuid = 0;
-                          my $marginal = undef;
-                          foreach my $cuid ($certifier->user_ids) {
-                            # grab the first full or ultimate user ID on
-                            # this certifier's key:
-                            if ($cuid->validity =~ /^[fu]$/) {
-                              push(@valid_certifiers, { key_id => $cert->hex_id,
-                                                        user_id => $cuid->as_string,
-                                                      } );
-                              $valid_cuid = 1;
-                              last;
-                            } elsif ($cuid->validity =~ /^[m]$/) {
-                              $marginal = { key_id => $cert->hex_id,
-                                            user_id => $cuid->as_string,
-                                          };
-                            }
-                          }
-                          push(@marginal_certifiers, $marginal)
-                            if (! $valid_cuid && defined $marginal);
-                        }
-                      }
-                    } else {
-                      msvalog('error', "certifier ID does not fit expected pattern '%s'\n", $cert->hex_id);
-                    }
-                  }
-                }
-                # else ## do we care at all about other User IDs on this key?
-
-                # We now know the list of fully/ultimately-valid
-                # certifiers, and a separate list of marginally-valid
-                # certifiers.
-                if ($#valid_certifiers == -1) {
-                  msvalog('info', "No valid certifiers, so no marginal UI\n");
-                } else {
-                  my $certifier_list = join("\n", map { sprintf("[%s] %s", $_->{key_id}, $_->{user_id}) } @valid_certifiers);
-                  my $msg = sprintf("The matching key we found for [%s] only has validity %s.\n(Key Fingerprint: 0x%.40s)\n----\nBut it was certified by the following folks:\n%s",
-                                    $uid,
-                                    $keyfpr->{val},
-                                    $keyfpr->{fpr}->as_hex_string,
-                                    $certifier_list,
-                                   );
-                  msvalog('info', "%s\n", $msg);
-                  my $resp = Crypt::Monkeysphere::MSVA::MarginalUI::prompt($msg);
-                  msvalog('info', "response: %s\n", $resp);
-                  if ($resp) {
-                    $ret->{valid} = JSON::true;
-                    $ret->{message} = sprintf('Manually validated "%s" through the OpenPGP Web of Trust.', $uid);
-                  }
-                }
-                # FIXME: not doing anything with @marginal_certifiers
-                # -- that'd be yet more queries to gpg :(
-              }
-            }
+          my $resp = Crypt::Monkeysphere::MSVA::MarginalUI->ask_the_user($gnupg,
+                                                                         $uid,
+                                                                         \@subvalid_key_fprs);
+          msvalog('info', "response: %s\n", $resp);
+          if ($resp) {
+            $ret->{valid} = JSON::true;
+            $ret->{message} = sprintf('Manually validated "%s" through the OpenPGP Web of Trust.', $uid);
           }
         }
       } else {
