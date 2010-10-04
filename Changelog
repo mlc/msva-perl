@@ -4,9 +4,11 @@ msva-perl (0.4~pre) upstream;
     directly (needs GnuPG::Interface, Regexp::Common) (closes MS #2034)
   * adds MSVA_KEYSERVER_POLICY and MSVA_KEYSERVER environment variables.
   * added a marginal UI (needs Gtk2 perl module) (closes MS #2004)
-  * untaint input uids (closes MS #2270)
+  * Filter incoming uids to match a strict regex (closes MS #2270)
+  * Trivially untaint the environment for the single child process
+    (closes MS #2461)
 
- -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Sat, 02 Oct 2010 23:54:11 -0400
+ -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Mon, 04 Oct 2010 01:06:52 -0400
 
 msva-perl (0.3) upstream;
 

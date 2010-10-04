@@ -594,7 +594,11 @@
           for my $arg (@ARGV) {
             msvalog('verbose', " %s\n", $arg);
           }
-          $ENV{PATH} = untaint($ENV{PATH});
+          # untaint the environment for the subprocess
+          # see: https://labs.riseup.net/code/issues/2461
+          foreach my $e (keys %ENV) {
+            $ENV{$e} = untaint($ENV{$e});
+          }
           my @args;
           foreach (@ARGV) {
             push @args, untaint($_);
