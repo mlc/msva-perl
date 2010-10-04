@@ -11,38 +11,35 @@
 
   use strict;
   use warnings;
-
-  my $resp = 0;
+  use Gtk2 '-init';
 
   sub prompt {
-    use Gtk2 '-init'; # auto-initializes Gtk2
-    use Gtk2::GladeXML;
-
-    my $glade;
-    my $label;
-
-    # populate UI from 
-    $glade = Gtk2::GladeXML->new("Crypt/Monkeysphere/MSVA/MarginalUI.glade");
-
-    # Connect the signals
-    $glade->signal_autoconnect_from_package('Crypt::Monkeysphere::MSVA::MarginalUI');
-    $label = $glade->get_widget('messageLabel');
-
     my $labeltxt = shift;
-    $label->set_text($labeltxt);
 
-    # Start it up
-    Gtk2->main;
+    # create a new dialog with some buttons - one stock, one not.
+    my $dialog = Gtk2::Dialog->new ('msva-perl prompt!', undef, qw( modal ),
+                                    'gtk-cancel' => 'cancel',
+                                    'Lemme at it!' => 'ok');
+    my $label = Gtk2::Label->new($labeltxt);
+    $label->show();
+    $dialog->get_content_area()->add($label);
+    my $resp = 0;
+
+    $dialog->set_default_response ('cancel');
+
+    # show and interact modally -- blocks until the user
+    # activates a response.
+    my $response = $dialog->run();
+    if ($response eq 'ok') {
+      $resp = 1;
+    }
+
+    $dialog->hide();
+    # activating a response does not destroy the window,
+    # that's up to you.
+    $dialog->destroy();
 
     return $resp;
-  }
-
-  sub on_yesButton_clicked {
-    $resp = 1;
-    Gtk2->main_quit;
-  }
-  sub on_noButton_clicked {
-    Gtk2->main_quit;
   }
 
   1;
