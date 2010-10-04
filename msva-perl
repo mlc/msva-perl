@@ -573,6 +573,12 @@ use strict;
                                     $certifier_list,
                                    );
                   msvalog('info', "%s\n", $msg);
+                  my $resp = Crypt::Monkeysphere::MSVA::MarginalUI::prompt($msg);
+                  msvalog('info', "response: %s\n", $resp);
+                  if ($resp) {
+                    $ret->{valid} = JSON::true;
+                    $ret->{message} = sprintf('Manually validated "%s" through the OpenPGP Web of Trust.', $uid);
+                  }
                 }
                 # FIXME: not doing anything with @marginal_certifiers
                 # -- that'd be yet more queries to gpg :(

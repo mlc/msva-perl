@@ -1,5 +1,3 @@
-#!/usr/bin/perl -w
-
 #----------------------------------------------------------------------
 # marginalUI
 #
@@ -11,51 +9,41 @@
 
 { package Crypt::Monkeysphere::MSVA::MarginalUI;
 
-use strict;
-use warnings;
+  use strict;
+  use warnings;
 
-use Gtk2 '-init'; # auto-initializes Gtk2
-use Gtk2::GladeXML;
+  my $resp = 0;
 
-my $glade;
-my $label;
+  sub prompt {
+    use Gtk2 '-init'; # auto-initializes Gtk2
+    use Gtk2::GladeXML;
 
-# populate UI from 
-$glade = Gtk2::GladeXML->new("Crypt/Monkeysphere/MSVA/MarginalUI.glade");
+    my $glade;
+    my $label;
 
-# Connect the signals
-$glade->signal_autoconnect_from_package('main');
+    # populate UI from 
+    $glade = Gtk2::GladeXML->new("Crypt/Monkeysphere/MSVA/MarginalUI.glade");
 
-$label = $glade->get_widget('messageLabel');
-my $labeltxt = <<'END';
-pub   4096R/E27BAABC 2007-01-08 [expires: 2012-01-07] 
-uid       [  full  ] Jameson Graef Rollins <jrollins@finestructure.net> 
-uid       [  full  ] Jameson Graef Rollins <jrollins@phys.columbia.edu>
-uid       [  full  ] Jameson Graef Rollins <jrollins@fifthhorseman.net>
-uid       [  full  ] Jameson Graef Rollins <jrollins@astro.columbia.edu>
-uid       [  full  ] Jameson Rollins <jrollins@fifthhorseman.net>
-uid       [  full  ] Jameson Graef Rollins <jameson.rollins@ligo.org>
-uid       [  full  ] [jpeg image of size 4097]
-uid       [marginal] Jameson Rollins <jrollins@finestructure.net>
-sub   4096R/1321E689 2007-01-09 [expires: 2012-01-08]
-sub   2048R/4414A10A 2008-06-18 [expires: 2013-06-17]
+    # Connect the signals
+    $glade->signal_autoconnect_from_package('Crypt::Monkeysphere::MSVA::MarginalUI');
+    $label = $glade->get_widget('messageLabel');
 
-Do you trust this dude?
-END
-$label->set_text($labeltxt);
+    my $labeltxt = shift;
+    $label->set_text($labeltxt);
 
-# Start it up
-Gtk2->main;
+    # Start it up
+    Gtk2->main;
 
-exit 0;
+    return $resp;
+  }
 
-sub on_yesButton_clicked {
-    exit 0;
-}
-sub on_noButton_clicked {
-    exit 1;
-}
+  sub on_yesButton_clicked {
+    $resp = 1;
+    Gtk2->main_quit;
+  }
+  sub on_noButton_clicked {
+    Gtk2->main_quit;
+  }
 
-1;
-
+  1;
 }
