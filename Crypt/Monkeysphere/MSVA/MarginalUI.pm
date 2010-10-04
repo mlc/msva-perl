@@ -11,13 +11,14 @@
 
   use strict;
   use warnings;
-  use Gtk2 '-init';
+  use Gtk2;
 
   sub prompt {
     my $labeltxt = shift;
 
+    Gtk2->init();
     # create a new dialog with some buttons - one stock, one not.
-    my $dialog = Gtk2::Dialog->new ('msva-perl prompt!', undef, qw( modal ),
+    my $dialog = Gtk2::Dialog->new ('msva-perl prompt!', undef, [],
                                     'gtk-cancel' => 'cancel',
                                     'Lemme at it!' => 'ok');
     my $label = Gtk2::Label->new($labeltxt);
@@ -27,17 +28,13 @@
 
     $dialog->set_default_response ('cancel');
 
-    # show and interact modally -- blocks until the user
-    # activates a response.
     my $response = $dialog->run();
     if ($response eq 'ok') {
       $resp = 1;
     }
 
-    $dialog->hide();
-    # activating a response does not destroy the window,
-    # that's up to you.
-    $dialog->destroy();
+    # we'll let the fact that the process is about to terminate
+    # destroy the window.  so lazy!
 
     return $resp;
   }
