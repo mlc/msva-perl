@@ -1,4 +1,4 @@
-msva-perl (0.4~pre) upstream;
+msva-perl (0.4) upstream;
 
   * removed dependency on monkeysphere package -- just invoke GnuPG
     directly (needs GnuPG::Interface, Regexp::Common) (closes MS #2034)
