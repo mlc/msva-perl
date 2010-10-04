@@ -98,10 +98,12 @@
             msvalog('info', "No valid certifiers, so no marginal UI\n");
           } else {
             my $certifier_list = join("\n", map { sprintf("[%s] %s", $_->{key_id}, $_->{user_id}) } @valid_certifiers);
-            my $msg = sprintf("The matching key we found for [%s] is not %svalid.\n(Key Fingerprint: 0x%.40s)\n----\nBut it was certified by the following folks:\n%s",
+            my $msg = sprintf("The matching key for [%s] is not %svalid.\n----------\nhost: %s\nkey fingerprint: 0x%.40s\nvalidity: %s\n----------\nThe certificate is certified by the following people:\n\n%s\n\nWould you like to temporarily accept this certification?",
                               $uid,
                               ('m' == $keyfpr->{val} ? 'fully ' : ''),
+			      $uid,
                               $keyfpr->{fpr}->as_hex_string,
+			      $keyfpr->{val},
                               $certifier_list,
                              );
             # FIXME: what about revoked certifications?
@@ -126,10 +128,17 @@
 
     Gtk2->init();
     # create a new dialog with some buttons - one stock, one not.
-    my $dialog = Gtk2::Dialog->new ('msva-perl prompt!', undef, [],
-                                    'gtk-cancel' => 'cancel',
-                                    'Lemme at it!' => 'ok');
+    my $dialog = Gtk2::Dialog->new('Monkeysphere validation agent',
+				    undef,
+				    [],
+				    'gtk-no' => 'cancel',
+				    'gtk-yes' => 'ok');
+
+
+
     my $label = Gtk2::Label->new($labeltxt);
+    # make the text in the dialog box selectable
+    $label->set('selectable', 1);
     $label->show();
     $dialog->get_content_area()->add($label);
     my $resp = 0;
