@@ -5,27 +5,29 @@ Maintainer: Daniel Kahn Gillmor <dkg@fifthhorseman.net>
 Uploaders: Micah Anderson <micah@debian.org>
 Build-Depends: debhelper (>= 7.0),
  perl
-Standards-Version: 3.8.4
+Standards-Version: 3.9.1
 Homepage: http://web.monkeysphere.info/
 Vcs-Git: git://git.monkeysphere.info/msva-perl
 
 Package: msva-perl
 Architecture: all
-Depends: monkeysphere,
+Depends: 
  libcrypt-x509-perl,
  libconvert-asn1-perl,
  libnet-server-perl,
  libhttp-server-simple-perl,
  libjson-perl,
  libparent-perl,
+ libgnupg-interface-perl (>= 0.42.02),
+ libregexp-common-perl,
+ libgtk2-perl,
  ${misc:Depends}
+Conflicts: monkeysphere (<< 0.32)
 Provides: monkeysphere-validation-agent
-Enhances: monkeysphere
+Enhances: xul-ext-monkeysphere
 Description: Cryptographic identity validation agent (Perl implementation)
  The Monkeysphere Validation Agent offers a local service for tools to
  validate certificates (both X.509 and OpenPGP) and other public keys.
  .
  This package contains a perl implementation of a Monkeysphere
  Validation Agent.
-
-

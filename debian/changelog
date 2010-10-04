@@ -1,3 +1,12 @@
+msva-perl (0.4-1) experimental; urgency=low
+
+  * New Upstream Release (to experimental)
+  * Bumped Standards-Version to 3.9.1 (no changes needed)
+  * Adopted Xsession.d script from monkeysphere package (which
+    unfortunately means we conflict with any monkeysphere package << 0.32)
+
+ -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Mon, 04 Oct 2010 01:11:15 -0400
+
 msva-perl (0.3-1) unstable; urgency=low
 
   * New Upstream Release:

@@ -1,2 +1,5 @@
 msva-perl usr/bin
 Net/Server/MSVA.pm usr/share/perl5/Net/Server
+Crypt/Monkeysphere/MSVA.pm usr/share/perl5/Crypt/Monkeysphere
+Crypt/Monkeysphere/MSVA/MarginalUI.pm usr/share/perl5/Crypt/Monkeysphere/MSVA
+debian/70monkeysphere_use-validation-agent etc/X11/Xsession.d
