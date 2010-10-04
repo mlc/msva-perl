@@ -1,0 +1,683 @@
+# Monkeysphere Validation Agent, Perl version
+# Copyright © 2010 Daniel Kahn Gillmor <dkg@fifthhorseman.net>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+{ package Crypt::Monkeysphere::MSVA;
+
+  use Crypt::Monkeysphere::MSVA::MarginalUI;
+  use parent qw(HTTP::Server::Simple::CGI);
+  require Crypt::X509;
+  use Regexp::Common qw /net/;
+  use Convert::ASN1;
+  use MIME::Base64;
+  use IO::Socket;
+  use IO::File;
+  use Socket;
+
+  use JSON;
+  use POSIX qw(strftime);
+  # we need the version of GnuPG::Interface that knows about pubkey_data, etc:
+  use GnuPG::Interface 0.42.02;
+
+  my $version = '0.1';
+
+  my $gnupg = GnuPG::Interface->new();
+  $gnupg->options->quiet(1);
+  $gnupg->options->batch(1);
+
+  my %dispatch = (
+                  '/' => { handler => \&noop,
+                           methods => { 'GET' => 1 },
+                         },
+                  '/reviewcert' => { handler => \&reviewcert,
+                                     methods => { 'POST' => 1 },
+                                   },
+                  '/extracerts' => { handler => \&extracerts,
+                                     methods => { 'POST' => 1 },
+                                   },
+                 );
+
+  my $default_keyserver = 'hkp://pool.sks-keyservers.net';
+  my $default_keyserver_policy = 'unlessvalid';
+
+# Net::Server log_level goes from 0 to 4
+# this is scaled to match.
+  my %loglevels = (
+                   'silent' => 0,
+                   'quiet' => 0.25,
+                   'fatal' => 0.5,
+                   'error' => 1,
+                   'info' => 2,
+                   'verbose' => 3,
+                   'debug' => 4,
+                   'debug1' => 4,
+                   'debug2' => 5,
+                   'debug3' => 6,
+                  );
+
+  my $rsa_decoder = Convert::ASN1->new;
+  $rsa_decoder->prepare(q<
+
+   SEQUENCE {
+        modulus INTEGER,
+        exponent INTEGER
+   }
+          >);
+
+  sub msvalog {
+    my $msglevel = shift;
+
+    my $level = $loglevels{lc($ENV{MSVA_LOG_LEVEL})};
+    $level = $loglevels{error} if (! defined $level);
+
+    if ($loglevels{lc($msglevel)} <= $level) {
+      printf STDERR @_;
+    }
+  };
+
+  sub get_log_level {
+    my $level = $loglevels{lc($ENV{MSVA_LOG_LEVEL})};
+    $level = $loglevels{error} if (! defined $level);
+    return $level;
+  }
+
+  sub net_server {
+    return 'Net::Server::MSVA';
+  };
+
+  sub new {
+    my $class = shift;
+
+    my $port = 0;
+    if (exists $ENV{MSVA_PORT}) {
+      $port = $ENV{MSVA_PORT} + 0;
+      die sprintf("not a reasonable port %d", $port) if (($port >= 65536) || $port <= 0);
+    }
+    # start the server on requested port
+    my $self = $class->SUPER::new($port);
+    if (! exists $ENV{MSVA_PORT}) {
+      # we can't pass port 0 to the constructor because it evaluates
+      # to false, so HTTP::Server::Simple just uses its internal
+      # default of 8080.  But if we want to select an arbitrary open
+      # port, we *can* set it here.
+      $self->port(0);
+    }
+
+    $self->{allowed_uids} = {};
+    if (exists $ENV{MSVA_ALLOWED_USERS}) {
+      msvalog('verbose', "MSVA_ALLOWED_USERS environment variable is set.\nLimiting access to specified users.\n");
+      foreach my $user (split(/ +/, $ENV{MSVA_ALLOWED_USERS})) {
+        my ($name, $passwd, $uid);
+        if ($user =~ /^[0-9]+$/) {
+          $uid = $user + 0; # force to integer
+        } else {
+          ($name,$passwd,$uid) = getpwnam($user);
+        }
+        if (defined $uid) {
+          msvalog('verbose', "Allowing access from user ID %d\n", $uid);
+          $self->{allowed_uids}->{$uid} = $user;
+        } else {
+          msvalog('error', "Could not find user '%d'; not allowing\n", $user);
+        }
+      }
+    } else {
+      # default is to allow access only to the current user
+      $self->{allowed_uids}->{POSIX::getuid()} = 'self';
+    }
+
+    bless ($self, $class);
+    return $self;
+  }
+
+  sub noop {
+    my $self = shift;
+    my $cgi = shift;
+    return '200 OK', { available => JSON::true,
+                       protoversion => 1,
+                       server => "MSVA-Perl ".$version };
+  }
+
+  # returns an empty list if bad key found.
+  sub parse_openssh_pubkey {
+    my $data = shift;
+    my ($label, $prop) = split(/ +/, $data);
+    $prop = decode_base64($prop) or return ();
+
+    msvalog('debug', "key properties: %s\n", unpack('H*', $prop));
+    my @out;
+    while (length($prop) > 4) {
+      my $size = unpack('N', substr($prop, 0, 4));
+      msvalog('debug', "size: 0x%08x\n", $size);
+      return () if (length($prop) < $size + 4);
+      push(@out, substr($prop, 4, $size));
+      $prop = substr($prop, 4 + $size);
+    }
+    return () if ($label ne $out[0]);
+    return @out;
+  }
+
+  # return the numeric ID of the peer on the other end of $socket,
+  # returning undef if unknown.
+  sub get_remote_peer_id {
+    my $socket = shift;
+
+    my $sock = IO::Socket->new_from_fd($socket, 'r');
+    # check SO_PEERCRED -- if this was a TCP socket, Linux
+    # might not be able to support SO_PEERCRED (even on the loopback),
+    # though apparently some kernels (Solaris?) are able to.
+
+    my $remotepeerid;
+    my $socktype = $sock->sockopt(SO_TYPE) or die "could not get SO_TYPE info";
+    if (defined $socktype) {
+      msvalog('debug', "sockopt(SO_TYPE) = %d\n", $socktype);
+    } else {
+      msvalog('verbose', "sockopt(SO_TYPE) returned undefined.\n");
+    }
+
+    my $peercred = $sock->sockopt(SO_PEERCRED) or die "could not get SO_PEERCRED info";
+    my $remotepeer = $sock->peername();
+    my $family = sockaddr_family($remotepeer); # should be AF_UNIX (a.k.a. AF_LOCAL) or AF_INET
+
+    msvalog('verbose', "socket family: %d\nsocket type: %d\n", $family, $socktype);
+
+    if ($peercred) {
+      # FIXME: on i386 linux, this appears to be three ints, according to
+      # /usr/include/linux/socket.h.  What about other platforms?
+      my ($pid, $uid, $gid) = unpack('iii', $peercred);
+
+      msvalog('verbose', "SO_PEERCRED: pid: %u, uid: %u, gid: %u\n",
+              $pid, $uid, $gid,
+             );
+      if ($pid != 0 && $uid != 0) { # then we can accept it:
+        $remotepeerid = $uid;
+      }
+    }
+
+    # another option in Linux would be to parse the contents of
+    # /proc/net/tcp to find the uid of the peer process based on that
+    # information.
+    if (! defined $remotepeerid) {
+      my $proto;
+      if ($family == AF_INET) {
+        $proto = '';
+      } elsif ($family == AF_INET6) {
+        $proto = '6';
+      }
+      if (defined $proto) {
+        if ($socktype == &SOCK_STREAM) {
+          $proto = 'tcp'.$proto;
+        } elsif ($socktype == &SOCK_DGRAM) {
+          $proto = 'udp'.$proto;
+        } else {
+          undef $proto;
+        }
+        if (defined $proto) {
+          my ($port, $iaddr) = unpack_sockaddr_in($remotepeer);
+          my $iaddrstring = unpack("H*", reverse($iaddr));
+          msvalog('verbose', "Port: %04x\nAddr: %s\n", $port, $iaddrstring);
+          my $remmatch = lc(sprintf("%s:%04x", $iaddrstring, $port));
+          my $infofile = '/proc/net/'.$proto;
+          my $f = new IO::File;
+          if ( $f->open('< '.$infofile)) {
+            my @header = split(/ +/, <$f>);
+            my ($localaddrix, $uidix);
+            my $ix = 0;
+            my $skipcount = 0;
+            while ($ix <= $#header) {
+              $localaddrix = $ix - $skipcount if (lc($header[$ix]) eq 'local_address');
+              $uidix = $ix - $skipcount if (lc($header[$ix]) eq 'uid');
+              $skipcount++ if (lc($header[$ix]) eq 'tx_queue') or (lc($header[$ix]) eq 'tr'); # these headers don't actually result in a new column during the data rows
+              $ix++;
+            }
+            if (!defined $localaddrix) {
+              msvalog('info', "Could not find local_address field in %s; unable to determine peer UID\n",
+                      $infofile);
+            } elsif (!defined $uidix) {
+              msvalog('info', "Could not find uid field in %s; unable to determine peer UID\n",
+                      $infofile);
+            } else {
+              msvalog('debug', "local_address: %d; uid: %d\n", $localaddrix,$uidix);
+              while (my @line = split(/ +/,<$f>)) {
+                if (lc($line[$localaddrix]) eq $remmatch) {
+                  if (defined $remotepeerid) {
+                    msvalog('error', "Warning! found more than one remote uid! (%s and %s\n", $remotepeerid, $line[$uidix]);
+                  } else {
+                    $remotepeerid = $line[$uidix];
+                    msvalog('info', "remote peer is uid %d\n",
+                            $remotepeerid);
+                  }
+                }
+              }
+            msvalog('error', "Warning! could not find peer information in %s.  Not verifying.\n", $infofile) unless defined $remotepeerid;
+            }
+          } else { # FIXME: we couldn't read the file.  what should we
+                   # do besides warning?
+            msvalog('info', "Could not read %s; unable to determine peer UID\n",
+                    $infofile);
+          }
+        }
+      }
+    }
+    return $remotepeerid;
+  }
+
+  sub handle_request {
+    my $self = shift;
+    my $cgi  = shift;
+
+    my $remotepeerid =  get_remote_peer_id(select);
+
+    if (defined $remotepeerid) {
+      # test that this is an allowed user:
+      if (exists $self->{allowed_uids}->{$remotepeerid}) {
+        msvalog('verbose', "Allowing access from uid %d (%s)\n", $remotepeerid, $self->{allowed_uids}->{$remotepeerid});
+      } else {
+        msvalog('error', "MSVA client connection from uid %d, forbidden.\n", $remotepeerid);
+        printf("HTTP/1.0 403 Forbidden -- peer does not match local user ID\r\nContent-Type: text/plain\r\nDate: %s\r\n\r\nHTTP/1.1 403 Not Found -- peer does not match the local user ID.  Are you sure the agent is running as the same user?\r\n",
+               strftime("%a, %d %b %Y %H:%M:%S %z", localtime(time())),);
+        return;
+      }
+    }
+
+    my $path = $cgi->path_info();
+    my $handler = $dispatch{$path};
+
+    if (ref($handler) eq "HASH") {
+      if (! exists $handler->{methods}->{$cgi->request_method()}) {
+        printf("HTTP/1.0 405 Method not allowed\r\nAllow: %s\r\nDate: %s\r\n",
+               join(', ', keys(%{$handler->{methods}})),
+               strftime("%a, %d %b %Y %H:%M:%S %z", localtime(time())));
+      } elsif (ref($handler->{handler}) ne "CODE") {
+        printf("HTTP/1.0 500 Server Error\r\nDate: %s\r\n",
+               strftime("%a, %d %b %Y %H:%M:%S %z", localtime(time())));
+      } else {
+        my $data = {};
+        my $ctype = $cgi->content_type();
+        msvalog('verbose', "Got %s %s (Content-Type: %s)\n", $cgi->request_method(), $path, defined $ctype ? $ctype : '**none supplied**');
+        if (defined $ctype) {
+          my @ctypes = split(/; */, $ctype);
+          $ctype = shift @ctypes;
+          if ($ctype eq 'application/json') {
+            $data = from_json($cgi->param('POSTDATA'));
+          }
+        };
+
+        my ($status, $object) = $handler->{handler}($data);
+        my $ret = to_json($object);
+        msvalog('info', "returning: %s\n", $ret);
+        printf("HTTP/1.0 %s\r\nDate: %s\r\nContent-Type: application/json\r\n\r\n%s",
+               $status,
+               strftime("%a, %d %b %Y %H:%M:%S %z", localtime(time())),
+               $ret);
+      }
+    } else {
+      printf("HTTP/1.0 404 Not Found -- not handled by Monkeysphere validation agent\r\nContent-Type: text/plain\r\nDate: %s\r\n\r\nHTTP/1.0 404 Not Found -- the path:\r\n   %s\r\nis not handled by the MonkeySphere validation agent.\r\nPlease try one of the following paths instead:\r\n\r\n%s\r\n",
+             strftime("%a, %d %b %Y %H:%M:%S %z", localtime(time())),
+             $path, ' * '.join("\r\n * ", keys %dispatch) );
+    }
+  }
+
+  sub keycomp {
+    my $rsakey = shift;
+    my $gpgkey = shift;
+
+    if ($gpgkey->algo_num != 1) {
+      msvalog('verbose', "Monkeysphere only does RSA keys.  This key is algorithm #%d\n", $gpgkey->algo_num);
+    } else {
+      if ($rsakey->{exponent}->bcmp($gpgkey->pubkey_data->[1]) == 0 &&
+          $rsakey->{modulus}->bcmp($gpgkey->pubkey_data->[0]) == 0) {
+        return 1;
+      }
+    }
+    return 0;
+  }
+
+  sub getuid {
+    my $data = shift;
+    if ($data->{context} =~ /^(https|ssh)$/) {
+      $data->{context} = $1;
+      if ($data->{peer} =~ /^($RE{net}{domain})$/) {
+        $data->{peer} = $1;
+        return $data->{context}.'://'.$data->{peer};
+      }
+    }
+  }
+
+  sub get_keyserver_policy {
+    if (exists $ENV{MSVA_KEYSERVER_POLICY}) {
+      if ($ENV{MSVA_KEYSERVER_POLICY} =~ /^(always|never|unlessvalid)$/) {
+        return $1;
+      }
+      msvalog('error', "Not a valid MSVA_KEYSERVER_POLICY):\n  %s\n", $ENV{MSVA_KEYSERVER_POLICY});
+    }
+    return $default_keyserver_policy;
+  }
+
+  sub get_keyserver {
+    # We should read from (first hit wins):
+    # the environment
+    if (exists $ENV{MSVA_KEYSERVER}) {
+      if ($ENV{MSVA_KEYSERVER} =~ /^((hkps?|finger|ldap):\/\/)?$RE{net}{domain}$/) {
+        return $1;
+      }
+      msvalog('error', "Not a valid keyserver (from MSVA_KEYSERVER):\n  %s\n", $ENV{MSVA_KEYSERVER});
+    }
+
+    # FIXME: some msva.conf file (system and user?)
+    # FIXME: the relevant gnupg.conf instead?
+
+    # the default_keyserver
+    return $default_keyserver;
+  }
+
+  sub fetch_uid_from_keyserver {
+    my $uid = shift;
+
+    my $cmd = IO::Handle->new();
+    my $out = IO::Handle->new();
+    my $nul = IO::File->new("< /dev/null");
+
+    msvalog('debug', "start ks query for UserID: %s", $uid);
+    my $pid = $gnupg->wrap_call
+      ( handles => GnuPG::Handles->new( command => $cmd, stdout => $out, stderr => $nul ),
+        command_args => [ '='.$uid ],
+        commands => [ '--keyserver',
+                      get_keyserver(),
+                      qw( --no-tty --with-colons --search ) ]
+      );
+    while (my $line = $out->getline()) {
+      msvalog('debug', "from ks query: (%d) %s", $cmd->fileno, $line);
+      if ($line =~ /^info:(\d+):(\d+)/ ) {
+        $cmd->print(join(' ', ($1..$2))."\n");
+        msvalog('debug', 'to ks query: '.join(' ', ($1..$2))."\n");
+      }
+    }
+    # FIXME: can we do something to avoid hanging forever?
+    waitpid($pid, 0);
+    msvalog('debug', "ks query returns %d\n", POSIX::WEXITSTATUS($?));
+  }
+
+  sub reviewcert {
+    my $data  = shift;
+    return if !ref $data;
+
+    my $status = '200 OK';
+    my $ret =  { valid => JSON::false,
+                 message => 'Unknown failure',
+               };
+
+    my $uid = getuid($data);
+    if ($uid eq []) {
+        msvalog('error', "invalid peer/context: %s/%s\n", $data->{context}, $data->{peer});
+        $ret->{message} = sprintf('invalid peer/context');
+        return $status, $ret;
+    }
+
+    my $rawdata = join('', map(chr, @{$data->{pkc}->{data}}));
+    my $cert = Crypt::X509->new(cert => $rawdata);
+    msvalog('verbose', "cert subject: %s\n", $cert->subject_cn());
+    msvalog('verbose', "cert issuer: %s\n", $cert->issuer_cn());
+    msvalog('verbose', "cert pubkey algo: %s\n", $cert->PubKeyAlg());
+    msvalog('verbose', "cert pubkey: %s\n", unpack('H*', $cert->pubkey()));
+
+    if ($cert->PubKeyAlg() ne 'RSA') {
+      $ret->{message} = sprintf('public key was algo "%s" (OID %s).  MSVA.pl only supports RSA',
+                                $cert->PubKeyAlg(), $cert->pubkey_algorithm);
+    } else {
+      my $key = $rsa_decoder->decode($cert->pubkey());
+      if ($key) {
+        # make sure that the returned integers are Math::BigInts:
+        $key->{exponent} = Math::BigInt->new($key->{exponent}) unless (ref($key->{exponent}));
+        $key->{modulus} = Math::BigInt->new($key->{modulus}) unless (ref($key->{modulus}));
+        msvalog('debug', "cert info:\nmodulus: %s\nexponent: %s\n",
+                $key->{modulus}->as_hex(),
+                $key->{exponent}->as_hex(),
+               );
+
+        if ($key->{modulus}->copy()->blog(2) < 1000) { # FIXME: this appears to be the full pubkey, including DER overhead
+          $ret->{message} = sprintf('public key size is less than 1000 bits (was: %d bits)', $cert->pubkey_size());
+        } else {
+          $ret->{message} = sprintf('Failed to validate "%s" through the OpenPGP Web of Trust.', $uid);
+          my $lastloop = 0;
+          if (get_keyserver_policy() eq 'always') {
+            fetch_uid_from_keyserver($uid);
+            $lastloop = 1;
+          } elsif (get_keyserver_policy() eq 'never') {
+            $lastloop = 1;
+          }
+          my $foundvalid = 0;
+          # needed because $gnupg spawns child processes
+          $ENV{PATH} = '/usr/local/bin:/usr/bin:/bin';
+
+          # fingerprints of keys that are not fully-valid for this User ID, but match
+          # the key from the queried certificate:
+          my @subvalid_key_fprs;
+
+          while (1) {
+            foreach my $gpgkey ($gnupg->get_public_keys('='.$uid)) {
+              my $validity = '-';
+              foreach my $tryuid ($gpgkey->user_ids) {
+                if ($tryuid->as_string eq $uid) {
+                  $validity = $tryuid->validity;
+                }
+              }
+              # treat primary keys just like subkeys:
+              foreach my $subkey ($gpgkey, @{$gpgkey->subkeys}) {
+                my $primarymatch = keycomp($key, $subkey);
+                if ($primarymatch) {
+                  if ($subkey->usage_flags =~ /a/) {
+                    msvalog('verbose', "key matches, and 0x%s is authentication-capable\n", $subkey->hex_id);
+                    if ($validity =~ /^[fu]$/) {
+                      $foundvalid = 1;
+                      msvalog('verbose', "...and it matches!\n");
+                      $ret->{valid} = JSON::true;
+                      $ret->{message} = sprintf('Successfully validated "%s" through the OpenPGP Web of Trust.', $uid);
+                    } else {
+                      push(@subvalid_key_fprs, { fpr => $subkey->fingerprint, val => $validity }) if $lastloop;
+                    }
+                  } else {
+                    msvalog('verbose', "key matches, but 0x%s is not authentication-capable\n", $subkey->hex_id);
+                  }
+                }
+              }
+            }
+            if ($lastloop) {
+              last;
+            } else {
+              fetch_uid_from_keyserver($uid) if (!$foundvalid);
+              $lastloop = 1;
+            }
+          }
+          msvalog('debug', "%d subvalid_key_fprs\n", $#subvalid_key_fprs+1);
+          foreach my $keyfpr (@subvalid_key_fprs) {
+            my $fprx = sprintf('0x%.40s', $keyfpr->{fpr}->as_hex_string);
+            msvalog('debug', "checking on %s\n", $fprx);
+            foreach my $gpgkey ($gnupg->get_public_keys_with_sigs($fprx)) {
+              msvalog('debug', "found key %.40s\n", $gpgkey->fingerprint->as_hex_string);
+              # we're going to prompt the user here if we have any
+              # relevant certifiers:
+              my @valid_certifiers;
+              my @marginal_certifiers;
+
+              # FIXME: if there are multiple keys in the OpenPGP WoT
+              # with the same key material and the same User ID
+              # attached, we'll be throwing multiple prompts per
+              # query.  That's a mess, but i'm not sure what the
+              # better thing to do is.
+              foreach my $user_id ($gpgkey->user_ids) {
+                msvalog('debug', "found EE User ID %s\n", $user_id->as_string);
+                if ($user_id->as_string eq $uid) {
+                  # get a list of the certifiers of the relevant User ID for the key
+                  foreach my $cert (@{$user_id->signatures}) {
+                    if ($cert->hex_id =~ /^([A-Fa-f0-9]{16})$/) {
+                      my $certid = $1;
+                      msvalog('debug', "found certifier 0x%.16s\n", $certid);
+                      if ($cert->is_valid()) {
+                        foreach my $certifier ($gnupg->get_public_keys(sprintf('0x%.40s!', $certid))) {
+                          my $valid_cuid = 0;
+                          my $marginal = undef;
+                          foreach my $cuid ($certifier->user_ids) {
+                            # grab the first full or ultimate user ID on
+                            # this certifier's key:
+                            if ($cuid->validity =~ /^[fu]$/) {
+                              push(@valid_certifiers, { key_id => $cert->hex_id,
+                                                        user_id => $cuid->as_string,
+                                                      } );
+                              $valid_cuid = 1;
+                              last;
+                            } elsif ($cuid->validity =~ /^[m]$/) {
+                              $marginal = { key_id => $cert->hex_id,
+                                            user_id => $cuid->as_string,
+                                          };
+                            }
+                          }
+                          push(@marginal_certifiers, $marginal)
+                            if (! $valid_cuid && defined $marginal);
+                        }
+                      }
+                    } else {
+                      msvalog('error', "certifier ID does not fit expected pattern '%s'\n", $cert->hex_id);
+                    }
+                  }
+                }
+                # else ## do we care at all about other User IDs on this key?
+
+                # We now know the list of fully/ultimately-valid
+                # certifiers, and a separate list of marginally-valid
+                # certifiers.
+                if ($#valid_certifiers == -1) {
+                  msvalog('info', "No valid certifiers, so no marginal UI\n");
+                } else {
+                  my $certifier_list = join("\n", map { sprintf("[%s] %s", $_->{key_id}, $_->{user_id}) } @valid_certifiers);
+                  my $msg = sprintf("The matching key we found for [%s] only has validity %s.\n(Key Fingerprint: 0x%.40s)\n----\nBut it was certified by the following folks:\n%s",
+                                    $uid,
+                                    $keyfpr->{val},
+                                    $keyfpr->{fpr}->as_hex_string,
+                                    $certifier_list,
+                                   );
+                  msvalog('info', "%s\n", $msg);
+                  my $resp = Crypt::Monkeysphere::MSVA::MarginalUI::prompt($msg);
+                  msvalog('info', "response: %s\n", $resp);
+                  if ($resp) {
+                    $ret->{valid} = JSON::true;
+                    $ret->{message} = sprintf('Manually validated "%s" through the OpenPGP Web of Trust.', $uid);
+                  }
+                }
+                # FIXME: not doing anything with @marginal_certifiers
+                # -- that'd be yet more queries to gpg :(
+              }
+            }
+          }
+        }
+      } else {
+        msvalog('error', "failed to decode %s\n", unpack('H*', $cert->pubkey()));
+        $ret->{message} = sprintf('failed to decode the public key', $uid);
+      }
+    }
+
+    return $status, $ret;
+  }
+
+  sub child_dies {
+    my $self = shift;
+    my $pid = shift;
+    my $server = shift;
+
+    msvalog('debug', "Subprocess %d terminated.\n", $pid);
+
+    if (exists $self->{child_pid} &&
+        ($self->{child_pid} == 0 ||
+         $self->{child_pid} == $pid)) {
+      my $exitstatus = POSIX::WEXITSTATUS($?);
+      msvalog('verbose', "Subprocess %d terminated; exiting %d.\n", $pid, $exitstatus);
+      $server->set_exit_status($exitstatus);
+      $server->server_close();
+    }
+  }
+
+  # use sparingly!  We want to keep taint mode around for the data we
+  # get over the network.  this is only here because we want to treat
+  # the command line arguments differently for the subprocess.
+  sub untaint {
+    my $x = shift;
+    $x =~ /^(.*)$/ ;
+    return $1;
+  }
+
+  sub post_bind_hook {
+    my $self = shift;
+    my $server = shift;
+
+    my $socketcount = @{ $server->{server}->{sock} };
+    if ( $socketcount != 1 ) {
+      msvalog('error', "%d sockets open; should have been 1.", $socketcount);
+      $server->set_exit_status(10);
+      $server->server_close();
+    }
+    my $port = @{ $server->{server}->{sock} }[0]->sockport();
+    if ((! defined $port) || ($port < 1) || ($port >= 65536)) {
+      msvalog('error', "got nonsense port: %d.", $port);
+      $server->set_exit_status(11);
+      $server->server_close();
+    }
+    if ((exists $ENV{MSVA_PORT}) && (($ENV{MSVA_PORT} + 0) != $port)) {
+      msvalog('error', "Explicitly requested port %d, but got port: %d.", ($ENV{MSVA_PORT}+0), $port);
+      $server->set_exit_status(13);
+      $server->server_close();
+    }
+    $self->port($port);
+
+    my $argcount = @ARGV;
+    if ($argcount) {
+      $self->{child_pid} = 0; # indicate that we are planning to fork.
+      my $fork = fork();
+      if (! defined $fork) {
+        msvalog('error', "could not fork\n");
+      } else {
+        if ($fork) {
+          msvalog('debug', "Child process has PID %d\n", $fork);
+          $self->{child_pid} = $fork;
+        } else {
+          msvalog('verbose', "PID %d executing: \n", $$);
+          for my $arg (@ARGV) {
+            msvalog('verbose', " %s\n", $arg);
+          }
+          $ENV{PATH} = untaint($ENV{PATH});
+          my @args;
+          foreach (@ARGV) {
+            push @args, untaint($_);
+          }
+          # restore default SIGCHLD handling:
+          $SIG{CHLD} = 'DEFAULT';
+          $ENV{MONKEYSPHERE_VALIDATION_AGENT_SOCKET} = sprintf('http://localhost:%d', $self->port);
+          exec(@args) or exit 111;
+        }
+      }
+    } else {
+      printf("MONKEYSPHERE_VALIDATION_AGENT_SOCKET=http://localhost:%d;\nexport MONKEYSPHERE_VALIDATION_AGENT_SOCKET;\n", $self->port);
+      # FIXME: consider daemonizing here to behave more like
+      # ssh-agent.  maybe avoid backgrounding by setting
+      # MSVA_NO_BACKGROUND.
+    };
+  }
+
+  sub extracerts {
+    my $data = shift;
+
+    return '500 not yet implemented', { };
+  }
+
+  1;
+}
