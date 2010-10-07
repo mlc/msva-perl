@@ -32,7 +32,7 @@ if [ -x "$MSVAGENT" ] ; then
    if [ "$(USE_VALIDATION_AGENT=
 [ -r "$MSSYSCONFIG" ]  && . "$MSSYSCONFIG" 2>/dev/null || :
 [ -r "$MSUSERCONFIG" ] && . "$MSUSERCONFIG" 2>/dev/null || :
-printf '%s' "$USE_VALIDATION_AGENT")" = "true" ] ; then
+printf '%s' "$USE_VALIDATION_AGENT")" != "false" ] ; then
         STARTUP="$MSVAGENT $STARTUP"
     fi
 fi
