@@ -102,12 +102,12 @@
                                                           $_->{key_id},
                                                          ) } @valid_certifiers);
             my $msg = sprintf("The matching key for [%s] is not %svalid.
-----------
+
 The certificate is certified by:
 
 %s
 
-Would you like to temporarily accept this certification?",
+Would you like to temporarily accept this certificate for this peer?",
                               $uid,
                               ('m' == $keyfpr->{val} ? 'fully ' : ''),
                               $certifier_list,
@@ -188,6 +188,8 @@ GnuPG calculated validity: %s",
     $dialog->set_default_icon_from_file($icon_file)
       if (-r $icon_file);
     $dialog->set_default_response('cancel');
+    # set initial kbd input focus on "No" also:
+    ($dialog->get_action_area()->get_children())[1]->grab_focus();
 
     my $response = $dialog->run();
     if ($response eq 'ok') {
