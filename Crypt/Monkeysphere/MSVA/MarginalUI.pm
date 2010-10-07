@@ -156,17 +156,22 @@ GnuPG calculated validity: %s",
     # make the text in the dialog box selectable
     $label->set('selectable', 1);
     $label->show();
-    my $button = Gtk2::Button->new_from_stock('gtk-properties');
+    my $button = Gtk2::Button->new_with_label($peer);
     $button->show();
+    my $tipshowing = 0;
     $button->signal_connect('clicked',
                             sub {
-                              $button->hide();
  # FIXME: for some reason, $label->set_text($labeltxt."\n\n".$tip) throws this error:
  # Insecure dependency in eval_sv() while running with -T switch at Crypt/Monkeysphere/MSVA/MarginalUI.pm line 180.
  # the workaround here (remove, destroy, re-create) seems to work, though.
                               $dialog->get_content_area()->remove($label);
                               $label->destroy();
-                              $label = Gtk2::Label->new($labeltxt."\n\n".$tip);
+                              if ($tipshowing) {
+                                $label = Gtk2::Label->new($labeltxt);
+                              } else {
+                                $label = Gtk2::Label->new($tip."\n\n".$labeltxt);
+                              }
+                              $tipshowing = ! $tipshowing;
                               $label->set('selectable', 1);
                               $label->show();
                               $dialog->get_content_area()->add($label);
@@ -174,8 +179,8 @@ GnuPG calculated validity: %s",
 
     my $tooltips = Gtk2::Tooltips->new();
     $tooltips->set_tip($label, $tip);
-    $dialog->get_content_area()->add($label);
     $dialog->get_content_area()->add($button);
+    $dialog->get_content_area()->add($label);
     my $resp = 0;
 
     my $icon_file = '/usr/share/pixmaps/monkeysphere-icon.png';
