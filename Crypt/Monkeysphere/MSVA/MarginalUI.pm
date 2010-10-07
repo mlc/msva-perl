@@ -101,7 +101,7 @@
                                                           $_->{user_id},
                                                           $_->{key_id},
                                                          ) } @valid_certifiers);
-            my $msg = sprintf("The matching key for [%s] is not %svalid.
+            my $msg = sprintf("The matching key for \"%s\" is not %svalid.
 
 The certificate is certified by:
 
@@ -112,9 +112,9 @@ Would you like to temporarily accept this certificate for this peer?",
                               ('m' == $keyfpr->{val} ? 'fully ' : ''),
                               $certifier_list,
                              );
-            my $tip = sprintf("Peer: %s
-Key fingerprint: 0x%.40s
-GnuPG calculated validity: %s",
+            my $tip = sprintf("Peer's User ID: %s
+Peer's OpenPGP key fingerprint: 0x%.40s
+GnuPG calculated validity for the peer: %s",
 			      $uid,
                               $keyfpr->{fpr}->as_hex_string,
 			      $keyfpr->{val},
@@ -159,6 +159,13 @@ GnuPG calculated validity: %s",
     my $button = Gtk2::Button->new_with_label($peer);
     $button->show();
     my $tipshowing = 0;
+
+    my $tooltips = Gtk2::Tooltips->new();
+    $tooltips->set_tip($label, $tip);
+    $dialog->get_content_area()->add($button);
+    $dialog->get_content_area()->add($label);
+
+    my ($width, $height) = $dialog->get_size();
     $button->signal_connect('clicked',
                             sub {
  # FIXME: for some reason, $label->set_text($labeltxt."\n\n".$tip) throws this error:
@@ -166,21 +173,19 @@ GnuPG calculated validity: %s",
  # the workaround here (remove, destroy, re-create) seems to work, though.
                               $dialog->get_content_area()->remove($label);
                               $label->destroy();
-                              if ($tipshowing) {
+                              $tipshowing = ! $tipshowing;
+                              if (!$tipshowing) {
                                 $label = Gtk2::Label->new($labeltxt);
+                                $tooltips->set_tip($label, $tip);
+                                $dialog->resize($width, $height);
                               } else {
                                 $label = Gtk2::Label->new($tip."\n\n".$labeltxt);
                               }
-                              $tipshowing = ! $tipshowing;
                               $label->set('selectable', 1);
                               $label->show();
                               $dialog->get_content_area()->add($label);
                             });
 
-    my $tooltips = Gtk2::Tooltips->new();
-    $tooltips->set_tip($label, $tip);
-    $dialog->get_content_area()->add($button);
-    $dialog->get_content_area()->add($label);
     my $resp = 0;
 
     my $icon_file = '/usr/share/pixmaps/monkeysphere-icon.png';
