@@ -94,23 +94,33 @@
           # We now know the list of fully/ultimately-valid
           # certifiers, and a separate list of marginally-valid
           # certifiers.
-          if ($#valid_certifiers == -1) {
+          if ($#valid_certifiers < -1) {
             msvalog('info', "No valid certifiers, so no marginal UI\n");
           } else {
             my $certifier_list = join("\n", map { sprintf("[%s] %s", $_->{key_id}, $_->{user_id}) } @valid_certifiers);
-            my $msg = sprintf("The matching key for [%s] is not %svalid.\n----------\nhost: %s\nkey fingerprint: 0x%.40s\nvalidity: %s\n----------\nThe certificate is certified by the following people:\n\n%s\n\nWould you like to temporarily accept this certification?",
+            my $msg = sprintf("The matching key for [%s] is not %svalid.
+----------
+The certificate is certified by:
+
+%s
+
+Would you like to temporarily accept this certification?",
                               $uid,
                               ('m' == $keyfpr->{val} ? 'fully ' : ''),
-			      $uid,
-                              $keyfpr->{fpr}->as_hex_string,
-			      $keyfpr->{val},
                               $certifier_list,
                              );
+            my $tip = sprintf("Peer: %s
+Key fingerprint: 0x%.40s
+GnuPG calculated validity: %s",
+			      $uid,
+                              $keyfpr->{fpr}->as_hex_string,
+			      $keyfpr->{val});
             # FIXME: what about revoked certifications?
             # FIXME: what about expired certifications?
             # FIXME: what about certifications ostensibly made in the future?
             msvalog('info', "%s\n", $msg);
-            my $resp = prompt($msg);
+            msvalog('verbose', "%s\n", $tip);
+            my $resp = prompt($uid, $msg, $tip);
             if ($resp) {
               return $resp;
             }
@@ -124,11 +134,13 @@
   }
 
   sub prompt {
+    my $peer = shift;
     my $labeltxt = shift;
+    my $tip = shift;
 
     Gtk2->init();
     # create a new dialog with some buttons - one stock, one not.
-    my $dialog = Gtk2::Dialog->new('Monkeysphere validation agent',
+    my $dialog = Gtk2::Dialog->new(sprintf('Monkeysphere validation agent [%s]', $peer),
 				    undef,
 				    [],
 				    'gtk-no' => 'cancel',
@@ -140,10 +152,16 @@
     # make the text in the dialog box selectable
     $label->set('selectable', 1);
     $label->show();
+    my $tooltips = Gtk2::Tooltips->new();
+    $tooltips->set_tip($label, $tip);
     $dialog->get_content_area()->add($label);
     my $resp = 0;
 
-    $dialog->set_default_response ('cancel');
+    my $icon_file = '/usr/share/pixmaps/monkeysphere-icon.png';
+
+    $dialog->set_default_icon_from_file($icon_file)
+      if (-r $icon_file);
+    $dialog->set_default_response('cancel');
 
     my $response = $dialog->run();
     if ($response eq 'ok') {
