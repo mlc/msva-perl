@@ -94,21 +94,37 @@
           # We now know the list of fully/ultimately-valid
           # certifiers, and a separate list of marginally-valid
           # certifiers.
-          if ($#valid_certifiers == -1) {
+          if ($#valid_certifiers < 0) {
             msvalog('info', "No valid certifiers, so no marginal UI\n");
           } else {
-            my $certifier_list = join("\n", map { sprintf("[%s] %s", $_->{key_id}, $_->{user_id}) } @valid_certifiers);
-            my $msg = sprintf("The matching key we found for [%s] is not %svalid.\n(Key Fingerprint: 0x%.40s)\n----\nBut it was certified by the following folks:\n%s",
+            my $certifier_list = join("\n", map { sprintf("%s [%s]",
+                                                          $_->{user_id},
+                                                          $_->{key_id},
+                                                         ) } @valid_certifiers);
+            my $msg = sprintf("The matching key for \"%s\" is not %svalid.
+
+The certificate is certified by:
+
+%s
+
+Would you like to temporarily accept this certificate for this peer?",
                               $uid,
                               ('m' == $keyfpr->{val} ? 'fully ' : ''),
-                              $keyfpr->{fpr}->as_hex_string,
                               $certifier_list,
+                             );
+            my $tip = sprintf("Peer's User ID: %s
+Peer's OpenPGP key fingerprint: 0x%.40s
+GnuPG calculated validity for the peer: %s",
+			      $uid,
+                              $keyfpr->{fpr}->as_hex_string,
+			      $keyfpr->{val},
                              );
             # FIXME: what about revoked certifications?
             # FIXME: what about expired certifications?
             # FIXME: what about certifications ostensibly made in the future?
             msvalog('info', "%s\n", $msg);
-            my $resp = prompt($msg);
+            msvalog('verbose', "%s\n", $tip);
+            my $resp = prompt($uid, $msg, $tip);
             if ($resp) {
               return $resp;
             }
@@ -122,19 +138,63 @@
   }
 
   sub prompt {
+    my $peer = shift;
     my $labeltxt = shift;
+    my $tip = shift;
 
     Gtk2->init();
     # create a new dialog with some buttons - one stock, one not.
-    my $dialog = Gtk2::Dialog->new ('msva-perl prompt!', undef, [],
-                                    'gtk-cancel' => 'cancel',
-                                    'Lemme at it!' => 'ok');
+    my $dialog = Gtk2::Dialog->new(sprintf('Monkeysphere validation agent [%s]', $peer),
+				    undef,
+				    [],
+				    'gtk-no' => 'cancel',
+				    'gtk-yes' => 'ok');
+
+
+
     my $label = Gtk2::Label->new($labeltxt);
+    # make the text in the dialog box selectable
+    $label->set('selectable', 1);
     $label->show();
+    my $button = Gtk2::Button->new_with_label($peer);
+    $button->show();
+    my $tipshowing = 0;
+
+    my $tooltips = Gtk2::Tooltips->new();
+    $tooltips->set_tip($label, $tip);
+    $dialog->get_content_area()->add($button);
     $dialog->get_content_area()->add($label);
+
+    my ($width, $height) = $dialog->get_size();
+    $button->signal_connect('clicked',
+                            sub {
+ # FIXME: for some reason, $label->set_text($labeltxt."\n\n".$tip) throws this error:
+ # Insecure dependency in eval_sv() while running with -T switch at Crypt/Monkeysphere/MSVA/MarginalUI.pm line 180.
+ # the workaround here (remove, destroy, re-create) seems to work, though.
+                              $dialog->get_content_area()->remove($label);
+                              $label->destroy();
+                              $tipshowing = ! $tipshowing;
+                              if (!$tipshowing) {
+                                $label = Gtk2::Label->new($labeltxt);
+                                $tooltips->set_tip($label, $tip);
+                                $dialog->resize($width, $height);
+                              } else {
+                                $label = Gtk2::Label->new($tip."\n\n".$labeltxt);
+                              }
+                              $label->set('selectable', 1);
+                              $label->show();
+                              $dialog->get_content_area()->add($label);
+                            });
+
     my $resp = 0;
 
-    $dialog->set_default_response ('cancel');
+    my $icon_file = '/usr/share/pixmaps/monkeysphere-icon.png';
+
+    $dialog->set_default_icon_from_file($icon_file)
+      if (-r $icon_file);
+    $dialog->set_default_response('cancel');
+    # set initial kbd input focus on "No" also:
+    ($dialog->get_action_area()->get_children())[1]->grab_focus();
 
     my $response = $dialog->run();
     if ($response eq 'ok') {
