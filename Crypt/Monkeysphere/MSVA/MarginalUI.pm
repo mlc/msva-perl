@@ -94,10 +94,13 @@
           # We now know the list of fully/ultimately-valid
           # certifiers, and a separate list of marginally-valid
           # certifiers.
-          if ($#valid_certifiers < -1) {
+          if ($#valid_certifiers < 0) {
             msvalog('info', "No valid certifiers, so no marginal UI\n");
           } else {
-            my $certifier_list = join("\n", map { sprintf("[%s] %s", $_->{key_id}, $_->{user_id}) } @valid_certifiers);
+            my $certifier_list = join("\n", map { sprintf("%s [%s]",
+                                                          $_->{user_id},
+                                                          $_->{key_id},
+                                                         ) } @valid_certifiers);
             my $msg = sprintf("The matching key for [%s] is not %svalid.
 ----------
 The certificate is certified by:
@@ -114,7 +117,8 @@ Key fingerprint: 0x%.40s
 GnuPG calculated validity: %s",
 			      $uid,
                               $keyfpr->{fpr}->as_hex_string,
-			      $keyfpr->{val});
+			      $keyfpr->{val},
+                             );
             # FIXME: what about revoked certifications?
             # FIXME: what about expired certifications?
             # FIXME: what about certifications ostensibly made in the future?
@@ -152,9 +156,26 @@ GnuPG calculated validity: %s",
     # make the text in the dialog box selectable
     $label->set('selectable', 1);
     $label->show();
+    my $button = Gtk2::Button->new_from_stock('gtk-properties');
+    $button->show();
+    $button->signal_connect('clicked',
+                            sub {
+                              $button->hide();
+ # FIXME: for some reason, $label->set_text($labeltxt."\n\n".$tip) throws this error:
+ # Insecure dependency in eval_sv() while running with -T switch at Crypt/Monkeysphere/MSVA/MarginalUI.pm line 180.
+ # the workaround here (remove, destroy, re-create) seems to work, though.
+                              $dialog->get_content_area()->remove($label);
+                              $label->destroy();
+                              $label = Gtk2::Label->new($labeltxt."\n\n".$tip);
+                              $label->set('selectable', 1);
+                              $label->show();
+                              $dialog->get_content_area()->add($label);
+                            });
+
     my $tooltips = Gtk2::Tooltips->new();
     $tooltips->set_tip($label, $tip);
     $dialog->get_content_area()->add($label);
+    $dialog->get_content_area()->add($button);
     my $resp = 0;
 
     my $icon_file = '/usr/share/pixmaps/monkeysphere-icon.png';
