@@ -102,8 +102,10 @@ on an arbitrary open port.
 =item MSVA_KEYSERVER
 
 msva-perl will request information from OpenPGP keyservers.  Set
-MSVA_KEYSERVER to declare the keyserver you want it to check with.
-Default is 'hkp://pool.sks-keyservers.net'.
+MSVA_KEYSERVER to declare the keyserver you want it to check with.  If
+this variable is blank or unset, and your gpg.conf contains a
+keyserver declaration, it will use the GnuPG configuration.  Failing
+that, the default is 'hkp://pool.sks-keyservers.net'.
 
 =item MSVA_KEYSERVER_POLICY
 

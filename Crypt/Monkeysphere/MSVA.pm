@@ -36,6 +36,9 @@
   use IO::Socket;
   use IO::File;
   use Socket;
+  use File::Spec;
+  use File::HomeDir;
+  use Config::General;
 
   use JSON;
   use POSIX qw(strftime);
@@ -367,7 +370,7 @@
   }
 
   sub get_keyserver_policy {
-    if (exists $ENV{MSVA_KEYSERVER_POLICY}) {
+    if (exists $ENV{MSVA_KEYSERVER_POLICY} and $ENV{MSVA_KEYSERVER_POLICY} ne '') {
       if ($ENV{MSVA_KEYSERVER_POLICY} =~ /^(always|never|unlessvalid)$/) {
         return $1;
       }
@@ -379,15 +382,38 @@
   sub get_keyserver {
     # We should read from (first hit wins):
     # the environment
-    if (exists $ENV{MSVA_KEYSERVER}) {
-      if ($ENV{MSVA_KEYSERVER} =~ /^((hkps?|finger|ldap):\/\/)?$RE{net}{domain}$/) {
+    if (exists $ENV{MSVA_KEYSERVER} and $ENV{MSVA_KEYSERVER} ne '') {
+      if ($ENV{MSVA_KEYSERVER} =~ /^(((hkps?|finger|ldap):\/\/)?$RE{net}{domain})$/) {
         return $1;
       }
       msvalog('error', "Not a valid keyserver (from MSVA_KEYSERVER):\n  %s\n", $ENV{MSVA_KEYSERVER});
     }
 
     # FIXME: some msva.conf file (system and user?)
-    # FIXME: the relevant gnupg.conf instead?
+
+    # or else read from the relevant gnupg.conf:
+    my $gpghome;
+    if (exists $ENV{GNUPGHOME} and $ENV{GNUPGHOME} ne '') {
+      $gpghome = untaint($ENV{GNUPGHOME});
+    } else {
+      $gpghome = File::Spec->catfile(File::HomeDir->my_home, '.gnupg');
+    }
+    my $gpgconf = File::Spec->catfile($gpghome, 'gpg.conf');
+    if (-f $gpgconf) {
+      if (-r $gpgconf) {
+        my %gpgconfig = Config::General::ParseConfig($gpgconf);
+        if ($gpgconfig{keyserver} =~ /^(((hkps?|finger|ldap):\/\/)?$RE{net}{domain})$/) {
+          msvalog('debug', "Using keyserver %s from the GnuPG configuration file (%s)\n", $1, $gpgconf);
+          return $1;
+        } else {
+          msvalog('error', "Not a valid keyserver (from gpg config %s):\n  %s\n", $gpgconf, $gpgconfig{keyserver});
+        }
+      } else {
+        msvalog('error', "The GnuPG configuration file (%s) is not readable\n", $gpgconf);
+      }
+    } else {
+      msvalog('info', "Did not find GnuPG configuration file while looking for keyserver '%s'\n", $gpgconf);
+    }
 
     # the default_keyserver
     return $default_keyserver;
@@ -400,12 +426,13 @@
     my $out = IO::Handle->new();
     my $nul = IO::File->new("< /dev/null");
 
-    msvalog('debug', "start ks query for UserID: %s", $uid);
+    my $ks = get_keyserver();
+    msvalog('debug', "start ks query to %s for UserID: %s\n", $ks, $uid);
     my $pid = $gnupg->wrap_call
       ( handles => GnuPG::Handles->new( command => $cmd, stdout => $out, stderr => $nul ),
         command_args => [ '='.$uid ],
         commands => [ '--keyserver',
-                      get_keyserver(),
+                      $ks,
                       qw( --no-tty --with-colons --search ) ]
       );
     while (my $line = $out->getline()) {
@@ -413,6 +440,7 @@
       if ($line =~ /^info:(\d+):(\d+)/ ) {
         $cmd->print(join(' ', ($1..$2))."\n");
         msvalog('debug', 'to ks query: '.join(' ', ($1..$2))."\n");
+        last;
       }
     }
     # FIXME: can we do something to avoid hanging forever?
@@ -462,6 +490,9 @@
         } else {
           $ret->{message} = sprintf('Failed to validate "%s" through the OpenPGP Web of Trust.', $uid);
           my $lastloop = 0;
+          msvalog('debug', "keyserver policy: %s\n", get_keyserver_policy);
+          # needed because $gnupg spawns child processes
+          $ENV{PATH} = '/usr/local/bin:/usr/bin:/bin';
           if (get_keyserver_policy() eq 'always') {
             fetch_uid_from_keyserver($uid);
             $lastloop = 1;
@@ -469,8 +500,6 @@
             $lastloop = 1;
           }
           my $foundvalid = 0;
-          # needed because $gnupg spawns child processes
-          $ENV{PATH} = '/usr/local/bin:/usr/bin:/bin';
 
           # fingerprints of keys that are not fully-valid for this User ID, but match
           # the key from the queried certificate:
