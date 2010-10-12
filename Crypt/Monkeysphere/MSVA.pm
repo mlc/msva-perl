@@ -666,8 +666,11 @@
     }
     $self->port($port);
 
-    my $argcount = @ARGV;
-    if ($argcount) {
+    if ((exists $ENV{MSVA_CHILD_PID}) && ($ENV{MSVA_CHILD_PID} ne '')) {
+      # this is most likely a re-exec.
+      msvalog('info', "This appears to be a re-exec, monitoring child pid %d\n", $ENV{MSVA_CHILD_PID});
+      $self->{child_pid} = $ENV{MSVA_CHILD_PID} + 0;
+    } elsif ($#ARGV >= 0) {
       $self->{child_pid} = 0; # indicate that we are planning to fork.
       my $fork = fork();
       if (! defined $fork) {
@@ -676,6 +679,7 @@
         if ($fork) {
           msvalog('debug', "Child process has PID %d\n", $fork);
           $self->{child_pid} = $fork;
+          $ENV{MSVA_CHILD_PID} = $fork;
         } else {
           msvalog('verbose', "PID %d executing: \n", $$);
           for my $arg (@ARGV) {
