@@ -1,3 +1,11 @@
+msva-perl (0.5-1) experimental; urgency=low
+
+  * New Upstream Release (to experimental)
+   - relaxed dependency on libgtk2-perl to Recommends: (no marginal UI
+     without it, though)
+
+ -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Tue, 12 Oct 2010 03:54:47 -0400
+
 msva-perl (0.4-1) experimental; urgency=low
 
   * New Upstream Release (to experimental)

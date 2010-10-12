@@ -3,7 +3,8 @@ Section: net
 Priority: extra
 Maintainer: Daniel Kahn Gillmor <dkg@fifthhorseman.net>
 Uploaders: Micah Anderson <micah@debian.org>
-Build-Depends: debhelper (>= 7.0),
+Build-Depends:
+ debhelper (>= 7.0),
  perl
 Standards-Version: 3.9.1
 Homepage: http://web.monkeysphere.info/
@@ -20,8 +21,11 @@ Depends:
  libparent-perl,
  libgnupg-interface-perl (>= 0.42.02),
  libregexp-common-perl,
- libgtk2-perl,
+ libfile-homedir-perl,
+ libconfig-general-perl,
  ${misc:Depends}
+Recommends:
+ libgtk2-perl
 Conflicts: monkeysphere (<< 0.32)
 Provides: monkeysphere-validation-agent
 Enhances: xul-ext-monkeysphere
