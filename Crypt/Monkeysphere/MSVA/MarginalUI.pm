@@ -26,9 +26,9 @@
   use strict;
   use warnings;
 
-  use Gtk2;
   use Crypt::Monkeysphere::MSVA qw( msvalog );
   use IO::File;
+  use Module::Load::Conditional;
 
   sub ask_the_user {
     my $self = shift;
@@ -39,6 +39,13 @@
     my @subvalid_key_fprs = @{$fprs};
 
     msvalog('debug', "%d subvalid_key_fprs\n", $#subvalid_key_fprs+1);
+
+    if (! Module::Load::Conditional::can_load('modules' => { 'Gtk2' => undef })) {
+      msvalog('info', "Gtk2 Perl module is unavailable, so no marginal UI presented\n");
+      return 0;
+    }
+
+
     foreach my $keyfpr (@subvalid_key_fprs) {
       my $fprx = sprintf('0x%.40s', $keyfpr->{fpr}->as_hex_string);
       msvalog('debug', "checking on %s\n", $fprx);
@@ -164,6 +171,7 @@ GnuPG calculated validity for the peer: %s",
     my $labeltxt = shift;
     my $tip = shift;
 
+    require Gtk2;
     Gtk2->init();
     # create a new dialog with some buttons - one stock, one not.
     my $dialog = Gtk2::Dialog->new(sprintf('Monkeysphere validation agent [%s]', $peer),

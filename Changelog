@@ -4,6 +4,9 @@ msva-perl (0.5~pre) unstable; urgency=low
     from ${GNUPGHOME}/gpg.conf if that file exists. (addresses MS #2080)
   * Under Linux, report details about the requesting process if we can
     learn them from /proc (closes MS #2005)
+  * Conditionally rely on Gtk2 perl module -- no marginal UI without it,
+    but you can also install the MSVA now without needing to pull in a
+    bunch of Gtk libs (closes MS #2514)
 
  -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Mon, 11 Oct 2010 16:02:22 -0400
 
