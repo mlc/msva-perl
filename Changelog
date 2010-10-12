@@ -1,4 +1,4 @@
-msva-perl (0.5~pre) unstable; urgency=low
+msva-perl (0.5) unstable; urgency=low
 
   * If ${MSVA_KEYSERVER} is unset or blank, default to using keyserver
     from ${GNUPGHOME}/gpg.conf if that file exists. (addresses MS #2080)
@@ -12,7 +12,7 @@ msva-perl (0.5~pre) unstable; urgency=low
     process.  This can be used to upgrade running msva instances after a
     package update (closes MS #2532)
 
- -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Mon, 11 Oct 2010 16:02:22 -0400
+ -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Tue, 12 Oct 2010 03:50:02 -0400
 
 msva-perl (0.4) upstream;
 
