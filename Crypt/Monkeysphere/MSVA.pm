@@ -36,6 +36,9 @@
   use IO::Socket;
   use IO::File;
   use Socket;
+  use File::Spec;
+  use File::HomeDir;
+  use Config::General;
 
   use JSON;
   use POSIX qw(strftime);
@@ -112,7 +115,8 @@
     my $class = shift;
 
     my $port = 0;
-    if (exists $ENV{MSVA_PORT}) {
+    if (exists $ENV{MSVA_PORT} and $ENV{MSVA_PORT} ne '') {
+      msvalog('debug', "MSVA_PORT set to %s\n", $ENV{MSVA_PORT});
       $port = $ENV{MSVA_PORT} + 0;
       die sprintf("not a reasonable port %d", $port) if (($port >= 65536) || $port <= 0);
     }
@@ -127,7 +131,7 @@
     }
 
     $self->{allowed_uids} = {};
-    if (exists $ENV{MSVA_ALLOWED_USERS}) {
+    if (exists $ENV{MSVA_ALLOWED_USERS} and $ENV{MSVA_ALLOWED_USERS} ne '') {
       msvalog('verbose', "MSVA_ALLOWED_USERS environment variable is set.\nLimiting access to specified users.\n");
       foreach my $user (split(/ +/, $ENV{MSVA_ALLOWED_USERS})) {
         my ($name, $passwd, $uid);
@@ -179,9 +183,50 @@
     return @out;
   }
 
-  # return the numeric ID of the peer on the other end of $socket,
-  # returning undef if unknown.
-  sub get_remote_peer_id {
+
+  # return an arrayref of processes which we can detect that have the
+  # given socket open (the socket is specified with its inode)
+  sub getpidswithsocketinode {
+    my $sockid = shift;
+
+    # this appears to be how Linux symlinks open sockets in /proc/*/fd,
+    # as of at least 2.6.26:
+    my $socktarget = sprintf('socket:[%d]', $sockid);
+    my @pids;
+
+    my $procfs;
+    if (opendir($procfs, '/proc')) {
+      foreach my $pid (grep { /^\d+$/ } readdir($procfs)) {
+        my $procdir = sprintf('/proc/%d', $pid);
+        if (-d $procdir) {
+          my $procfds;
+          if (opendir($procfds, sprintf('/proc/%d/fd', $pid))) {
+            foreach my $procfd (grep { /^\d+$/ } readdir($procfds)) {
+              my $fd = sprintf('/proc/%d/fd/%d', $pid, $procfd);
+              if (-l $fd) {
+                #my ($dev,$ino,$mode,$nlink,$uid,$gid) = lstat($fd);
+                my $targ = readlink($fd);
+                push @pids, $pid
+                  if ($targ eq $socktarget);
+              }
+            }
+            closedir($procfds);
+          }
+        }
+      }
+      closedir($procfs);
+    }
+
+    # FIXME: this whole business is very linux-specific, i think.  i
+    # wonder how to get this info in other OSes?
+
+    return \@pids;
+  }
+
+  # return {uid => X, inode => Y}, meaning the numeric ID of the peer
+  # on the other end of $socket, "socket inode" identifying the peer's
+  # open network socket.  each value could be undef if unknown.
+  sub get_client_info {
     my $socket = shift;
 
     my $sock = IO::Socket->new_from_fd($socket, 'r');
@@ -189,7 +234,8 @@
     # might not be able to support SO_PEERCRED (even on the loopback),
     # though apparently some kernels (Solaris?) are able to.
 
-    my $remotepeerid;
+    my $clientid;
+    my $remotesocketinode;
     my $socktype = $sock->sockopt(SO_TYPE) or die "could not get SO_TYPE info";
     if (defined $socktype) {
       msvalog('debug', "sockopt(SO_TYPE) = %d\n", $socktype);
@@ -198,8 +244,8 @@
     }
 
     my $peercred = $sock->sockopt(SO_PEERCRED) or die "could not get SO_PEERCRED info";
-    my $remotepeer = $sock->peername();
-    my $family = sockaddr_family($remotepeer); # should be AF_UNIX (a.k.a. AF_LOCAL) or AF_INET
+    my $client = $sock->peername();
+    my $family = sockaddr_family($client); # should be AF_UNIX (a.k.a. AF_LOCAL) or AF_INET
 
     msvalog('verbose', "socket family: %d\nsocket type: %d\n", $family, $socktype);
 
@@ -212,14 +258,16 @@
               $pid, $uid, $gid,
              );
       if ($pid != 0 && $uid != 0) { # then we can accept it:
-        $remotepeerid = $uid;
+        $clientid = $uid;
       }
+      # FIXME: can we get the socket inode as well this way?
     }
 
     # another option in Linux would be to parse the contents of
     # /proc/net/tcp to find the uid of the peer process based on that
     # information.
-    if (! defined $remotepeerid) {
+    if (! defined $clientid) {
+      msvalog('verbose', "SO_PEERCRED failed, digging around in /proc/net/tcp\n");
       my $proto;
       if ($family == AF_INET) {
         $proto = '';
@@ -235,7 +283,7 @@
           undef $proto;
         }
         if (defined $proto) {
-          my ($port, $iaddr) = unpack_sockaddr_in($remotepeer);
+          my ($port, $iaddr) = unpack_sockaddr_in($client);
           my $iaddrstring = unpack("H*", reverse($iaddr));
           msvalog('verbose', "Port: %04x\nAddr: %s\n", $port, $iaddrstring);
           my $remmatch = lc(sprintf("%s:%04x", $iaddrstring, $port));
@@ -243,12 +291,13 @@
           my $f = new IO::File;
           if ( $f->open('< '.$infofile)) {
             my @header = split(/ +/, <$f>);
-            my ($localaddrix, $uidix);
+            my ($localaddrix, $uidix, $inodeix);
             my $ix = 0;
             my $skipcount = 0;
             while ($ix <= $#header) {
               $localaddrix = $ix - $skipcount if (lc($header[$ix]) eq 'local_address');
               $uidix = $ix - $skipcount if (lc($header[$ix]) eq 'uid');
+              $inodeix = $ix - $skipcount if (lc($header[$ix]) eq 'inode');
               $skipcount++ if (lc($header[$ix]) eq 'tx_queue') or (lc($header[$ix]) eq 'tr'); # these headers don't actually result in a new column during the data rows
               $ix++;
             }
@@ -258,20 +307,24 @@
             } elsif (!defined $uidix) {
               msvalog('info', "Could not find uid field in %s; unable to determine peer UID\n",
                       $infofile);
+            } elsif (!defined $inodeix) {
+              msvalog('info', "Could not find inode field in %s; unable to determine peer network socket inode\n",
+                      $infofile);
             } else {
               msvalog('debug', "local_address: %d; uid: %d\n", $localaddrix,$uidix);
               while (my @line = split(/ +/,<$f>)) {
                 if (lc($line[$localaddrix]) eq $remmatch) {
-                  if (defined $remotepeerid) {
-                    msvalog('error', "Warning! found more than one remote uid! (%s and %s\n", $remotepeerid, $line[$uidix]);
+                  if (defined $clientid) {
+                    msvalog('error', "Warning! found more than one remote uid! (%s and %s\n", $clientid, $line[$uidix]);
                   } else {
-                    $remotepeerid = $line[$uidix];
-                    msvalog('info', "remote peer is uid %d\n",
-                            $remotepeerid);
+                    $clientid = $line[$uidix];
+                    $remotesocketinode = $line[$inodeix];
+                    msvalog('info', "remote peer is uid %d (inode %d)\n",
+                            $clientid, $remotesocketinode);
                   }
                 }
               }
-            msvalog('error', "Warning! could not find peer information in %s.  Not verifying.\n", $infofile) unless defined $remotepeerid;
+            msvalog('error', "Warning! could not find peer information in %s.  Not verifying.\n", $infofile) unless defined $clientid;
             }
           } else { # FIXME: we couldn't read the file.  what should we
                    # do besides warning?
@@ -281,21 +334,23 @@
         }
       }
     }
-    return $remotepeerid;
+    return { 'uid' => $clientid,
+             'inode' => $remotesocketinode };
   }
 
   sub handle_request {
     my $self = shift;
     my $cgi  = shift;
 
-    my $remotepeerid =  get_remote_peer_id(select);
+    my $clientinfo = get_client_info(select);
+    my $clientuid = $clientinfo->{uid};
 
-    if (defined $remotepeerid) {
+    if (defined $clientuid) {
       # test that this is an allowed user:
-      if (exists $self->{allowed_uids}->{$remotepeerid}) {
-        msvalog('verbose', "Allowing access from uid %d (%s)\n", $remotepeerid, $self->{allowed_uids}->{$remotepeerid});
+      if (exists $self->{allowed_uids}->{$clientuid}) {
+        msvalog('verbose', "Allowing access from uid %d (%s)\n", $clientuid, $self->{allowed_uids}->{$clientuid});
       } else {
-        msvalog('error', "MSVA client connection from uid %d, forbidden.\n", $remotepeerid);
+        msvalog('error', "MSVA client connection from uid %d, forbidden.\n", $clientuid);
         printf("HTTP/1.0 403 Forbidden -- peer does not match local user ID\r\nContent-Type: text/plain\r\nDate: %s\r\n\r\nHTTP/1.1 403 Not Found -- peer does not match the local user ID.  Are you sure the agent is running as the same user?\r\n",
                strftime("%a, %d %b %Y %H:%M:%S %z", localtime(time())),);
         return;
@@ -325,7 +380,7 @@
           }
         };
 
-        my ($status, $object) = $handler->{handler}($data);
+        my ($status, $object) = $handler->{handler}($data, $clientinfo);
         my $ret = to_json($object);
         msvalog('info', "returning: %s\n", $ret);
         printf("HTTP/1.0 %s\r\nDate: %s\r\nContent-Type: application/json\r\n\r\n%s",
@@ -367,7 +422,7 @@
   }
 
   sub get_keyserver_policy {
-    if (exists $ENV{MSVA_KEYSERVER_POLICY}) {
+    if (exists $ENV{MSVA_KEYSERVER_POLICY} and $ENV{MSVA_KEYSERVER_POLICY} ne '') {
       if ($ENV{MSVA_KEYSERVER_POLICY} =~ /^(always|never|unlessvalid)$/) {
         return $1;
       }
@@ -379,15 +434,38 @@
   sub get_keyserver {
     # We should read from (first hit wins):
     # the environment
-    if (exists $ENV{MSVA_KEYSERVER}) {
-      if ($ENV{MSVA_KEYSERVER} =~ /^((hkps?|finger|ldap):\/\/)?$RE{net}{domain}$/) {
+    if (exists $ENV{MSVA_KEYSERVER} and $ENV{MSVA_KEYSERVER} ne '') {
+      if ($ENV{MSVA_KEYSERVER} =~ /^(((hkps?|finger|ldap):\/\/)?$RE{net}{domain})$/) {
         return $1;
       }
       msvalog('error', "Not a valid keyserver (from MSVA_KEYSERVER):\n  %s\n", $ENV{MSVA_KEYSERVER});
     }
 
-    # FIXME: some msva.conf file (system and user?)
-    # FIXME: the relevant gnupg.conf instead?
+    # FIXME: some msva.conf or monkeysphere.conf file (system and user?)
+
+    # or else read from the relevant gnupg.conf:
+    my $gpghome;
+    if (exists $ENV{GNUPGHOME} and $ENV{GNUPGHOME} ne '') {
+      $gpghome = untaint($ENV{GNUPGHOME});
+    } else {
+      $gpghome = File::Spec->catfile(File::HomeDir->my_home, '.gnupg');
+    }
+    my $gpgconf = File::Spec->catfile($gpghome, 'gpg.conf');
+    if (-f $gpgconf) {
+      if (-r $gpgconf) {
+        my %gpgconfig = Config::General::ParseConfig($gpgconf);
+        if ($gpgconfig{keyserver} =~ /^(((hkps?|finger|ldap):\/\/)?$RE{net}{domain})$/) {
+          msvalog('debug', "Using keyserver %s from the GnuPG configuration file (%s)\n", $1, $gpgconf);
+          return $1;
+        } else {
+          msvalog('error', "Not a valid keyserver (from gpg config %s):\n  %s\n", $gpgconf, $gpgconfig{keyserver});
+        }
+      } else {
+        msvalog('error', "The GnuPG configuration file (%s) is not readable\n", $gpgconf);
+      }
+    } else {
+      msvalog('info', "Did not find GnuPG configuration file while looking for keyserver '%s'\n", $gpgconf);
+    }
 
     # the default_keyserver
     return $default_keyserver;
@@ -400,12 +478,13 @@
     my $out = IO::Handle->new();
     my $nul = IO::File->new("< /dev/null");
 
-    msvalog('debug', "start ks query for UserID: %s", $uid);
+    my $ks = get_keyserver();
+    msvalog('debug', "start ks query to %s for UserID: %s\n", $ks, $uid);
     my $pid = $gnupg->wrap_call
       ( handles => GnuPG::Handles->new( command => $cmd, stdout => $out, stderr => $nul ),
         command_args => [ '='.$uid ],
         commands => [ '--keyserver',
-                      get_keyserver(),
+                      $ks,
                       qw( --no-tty --with-colons --search ) ]
       );
     while (my $line = $out->getline()) {
@@ -413,6 +492,7 @@
       if ($line =~ /^info:(\d+):(\d+)/ ) {
         $cmd->print(join(' ', ($1..$2))."\n");
         msvalog('debug', 'to ks query: '.join(' ', ($1..$2))."\n");
+        last;
       }
     }
     # FIXME: can we do something to avoid hanging forever?
@@ -422,6 +502,7 @@
 
   sub reviewcert {
     my $data  = shift;
+    my $clientinfo  = shift;
     return if !ref $data;
 
     my $status = '200 OK';
@@ -462,6 +543,9 @@
         } else {
           $ret->{message} = sprintf('Failed to validate "%s" through the OpenPGP Web of Trust.', $uid);
           my $lastloop = 0;
+          msvalog('debug', "keyserver policy: %s\n", get_keyserver_policy);
+          # needed because $gnupg spawns child processes
+          $ENV{PATH} = '/usr/local/bin:/usr/bin:/bin';
           if (get_keyserver_policy() eq 'always') {
             fetch_uid_from_keyserver($uid);
             $lastloop = 1;
@@ -469,8 +553,6 @@
             $lastloop = 1;
           }
           my $foundvalid = 0;
-          # needed because $gnupg spawns child processes
-          $ENV{PATH} = '/usr/local/bin:/usr/bin:/bin';
 
           # fingerprints of keys that are not fully-valid for this User ID, but match
           # the key from the queried certificate:
@@ -512,13 +594,18 @@
             }
           }
 
-          my $resp = Crypt::Monkeysphere::MSVA::MarginalUI->ask_the_user($gnupg,
-                                                                         $uid,
-                                                                         \@subvalid_key_fprs);
-          msvalog('info', "response: %s\n", $resp);
-          if ($resp) {
-            $ret->{valid} = JSON::true;
-            $ret->{message} = sprintf('Manually validated "%s" through the OpenPGP Web of Trust.', $uid);
+          # only show the marginal UI if the UID of the corresponding
+          # key is not fully valid.
+          if (!$foundvalid) {
+            my $resp = Crypt::Monkeysphere::MSVA::MarginalUI->ask_the_user($gnupg,
+                                                                           $uid,
+                                                                           \@subvalid_key_fprs,
+                                                                           getpidswithsocketinode($clientinfo->{inode}));
+            msvalog('info', "response: %s\n", $resp);
+            if ($resp) {
+              $ret->{valid} = JSON::true;
+              $ret->{message} = sprintf('Manually validated "%s" through the OpenPGP Web of Trust.', $uid);
+            }
           }
         }
       } else {
@@ -562,13 +649,13 @@
 
     my $socketcount = @{ $server->{server}->{sock} };
     if ( $socketcount != 1 ) {
-      msvalog('error', "%d sockets open; should have been 1.", $socketcount);
+      msvalog('error', "%d sockets open; should have been 1.\n", $socketcount);
       $server->set_exit_status(10);
       $server->server_close();
     }
     my $port = @{ $server->{server}->{sock} }[0]->sockport();
     if ((! defined $port) || ($port < 1) || ($port >= 65536)) {
-      msvalog('error', "got nonsense port: %d.", $port);
+      msvalog('error', "got nonsense port: %d.\n", $port);
       $server->set_exit_status(11);
       $server->server_close();
     }
@@ -579,8 +666,11 @@
     }
     $self->port($port);
 
-    my $argcount = @ARGV;
-    if ($argcount) {
+    if ((exists $ENV{MSVA_CHILD_PID}) && ($ENV{MSVA_CHILD_PID} ne '')) {
+      # this is most likely a re-exec.
+      msvalog('info', "This appears to be a re-exec, monitoring child pid %d\n", $ENV{MSVA_CHILD_PID});
+      $self->{child_pid} = $ENV{MSVA_CHILD_PID} + 0;
+    } elsif ($#ARGV >= 0) {
       $self->{child_pid} = 0; # indicate that we are planning to fork.
       my $fork = fork();
       if (! defined $fork) {
@@ -589,6 +679,7 @@
         if ($fork) {
           msvalog('debug', "Child process has PID %d\n", $fork);
           $self->{child_pid} = $fork;
+          $ENV{MSVA_CHILD_PID} = $fork;
         } else {
           msvalog('verbose', "PID %d executing: \n", $$);
           for my $arg (@ARGV) {

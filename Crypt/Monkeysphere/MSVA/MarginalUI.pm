@@ -26,17 +26,26 @@
   use strict;
   use warnings;
 
-  use Gtk2;
   use Crypt::Monkeysphere::MSVA qw( msvalog );
+  use IO::File;
+  use Module::Load::Conditional;
 
   sub ask_the_user {
     my $self = shift;
     my $gnupg = shift;
     my $uid = shift;
     my $fprs = shift;
+    my $clientpids = shift;
     my @subvalid_key_fprs = @{$fprs};
 
     msvalog('debug', "%d subvalid_key_fprs\n", $#subvalid_key_fprs+1);
+
+    if (! Module::Load::Conditional::can_load('modules' => { 'Gtk2' => undef })) {
+      msvalog('info', "Gtk2 Perl module is unavailable, so no marginal UI presented\n");
+      return 0;
+    }
+
+
     foreach my $keyfpr (@subvalid_key_fprs) {
       my $fprx = sprintf('0x%.40s', $keyfpr->{fpr}->as_hex_string);
       msvalog('debug', "checking on %s\n", $fprx);
@@ -109,7 +118,7 @@ The certificate is certified by:
 
 Would you like to temporarily accept this certificate for this peer?",
                               $uid,
-                              ('m' == $keyfpr->{val} ? 'fully ' : ''),
+                              ('m' eq $keyfpr->{val} ? 'fully ' : ''),
                               $certifier_list,
                              );
             my $tip = sprintf("Peer's User ID: %s
@@ -122,8 +131,28 @@ GnuPG calculated validity for the peer: %s",
             # FIXME: what about revoked certifications?
             # FIXME: what about expired certifications?
             # FIXME: what about certifications ostensibly made in the future?
+
+            my @clienttext;
+            foreach my $clientpid (@{$clientpids}) {
+              my $cmd = '<unknown>';
+              # FIXME: not very portable
+              my $procfh;
+              $procfh = new IO::File(sprintf('/proc/%d/cmdline', $clientpid));
+              if (defined $procfh) {
+                $cmd = <$procfh>;
+                $procfh->close;
+                # FIXME: maybe there's a better way to display this textually
+                # that doesn't conflate spaces with argument delimiters?
+                $cmd = join(' ', split(/\0/, $cmd));
+              }
+              push @clienttext, sprintf("Process %d (%s)", $clientpid, $cmd);
+            }
+            if ($#clienttext >= 0) {
+              $tip = sprintf("%s\n\nRequested by:\n%s\n", $tip, join("\n", @clienttext));
+            }
             msvalog('info', "%s\n", $msg);
             msvalog('verbose', "%s\n", $tip);
+
             my $resp = prompt($uid, $msg, $tip);
             if ($resp) {
               return $resp;
@@ -142,6 +171,7 @@ GnuPG calculated validity for the peer: %s",
     my $labeltxt = shift;
     my $tip = shift;
 
+    require Gtk2;
     Gtk2->init();
     # create a new dialog with some buttons - one stock, one not.
     my $dialog = Gtk2::Dialog->new(sprintf('Monkeysphere validation agent [%s]', $peer),
