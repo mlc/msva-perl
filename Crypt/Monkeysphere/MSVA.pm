@@ -130,7 +130,7 @@
     }
 
     $self->{allowed_uids} = {};
-    if (exists $ENV{MSVA_ALLOWED_USERS}) {
+    if (exists $ENV{MSVA_ALLOWED_USERS} and $ENV{MSVA_ALLOWED_USERS} ne '') {
       msvalog('verbose', "MSVA_ALLOWED_USERS environment variable is set.\nLimiting access to specified users.\n");
       foreach my $user (split(/ +/, $ENV{MSVA_ALLOWED_USERS})) {
         my ($name, $passwd, $uid);
@@ -182,9 +182,50 @@
     return @out;
   }
 
-  # return the numeric ID of the peer on the other end of $socket,
-  # returning undef if unknown.
-  sub get_remote_peer_id {
+
+  # return an arrayref of processes which we can detect that have the
+  # given socket open (the socket is specified with its inode)
+  sub getpidswithsocketinode {
+    my $sockid = shift;
+
+    # this appears to be how Linux symlinks open sockets in /proc/*/fd,
+    # as of at least 2.6.26:
+    my $socktarget = sprintf('socket:[%d]', $sockid);
+    my @pids;
+
+    my $procfs;
+    if (opendir($procfs, '/proc')) {
+      foreach my $pid (grep { /^\d+$/ } readdir($procfs)) {
+        my $procdir = sprintf('/proc/%d', $pid);
+        if (-d $procdir) {
+          my $procfds;
+          if (opendir($procfds, sprintf('/proc/%d/fd', $pid))) {
+            foreach my $procfd (grep { /^\d+$/ } readdir($procfds)) {
+              my $fd = sprintf('/proc/%d/fd/%d', $pid, $procfd);
+              if (-l $fd) {
+                #my ($dev,$ino,$mode,$nlink,$uid,$gid) = lstat($fd);
+                my $targ = readlink($fd);
+                push @pids, $pid
+                  if ($targ eq $socktarget);
+              }
+            }
+            closedir($procfds);
+          }
+        }
+      }
+      closedir($procfs);
+    }
+
+    # FIXME: this whole business is very linux-specific, i think.  i
+    # wonder how to get this info in other OSes?
+
+    return \@pids;
+  }
+
+  # return {uid => X, inode => Y}, meaning the numeric ID of the peer
+  # on the other end of $socket, "socket inode" identifying the peer's
+  # open network socket.  each value could be undef if unknown.
+  sub get_client_info {
     my $socket = shift;
 
     my $sock = IO::Socket->new_from_fd($socket, 'r');
@@ -192,7 +233,8 @@
     # might not be able to support SO_PEERCRED (even on the loopback),
     # though apparently some kernels (Solaris?) are able to.
 
-    my $remotepeerid;
+    my $clientid;
+    my $remotesocketinode;
     my $socktype = $sock->sockopt(SO_TYPE) or die "could not get SO_TYPE info";
     if (defined $socktype) {
       msvalog('debug', "sockopt(SO_TYPE) = %d\n", $socktype);
@@ -201,8 +243,8 @@
     }
 
     my $peercred = $sock->sockopt(SO_PEERCRED) or die "could not get SO_PEERCRED info";
-    my $remotepeer = $sock->peername();
-    my $family = sockaddr_family($remotepeer); # should be AF_UNIX (a.k.a. AF_LOCAL) or AF_INET
+    my $client = $sock->peername();
+    my $family = sockaddr_family($client); # should be AF_UNIX (a.k.a. AF_LOCAL) or AF_INET
 
     msvalog('verbose', "socket family: %d\nsocket type: %d\n", $family, $socktype);
 
@@ -215,14 +257,16 @@
               $pid, $uid, $gid,
              );
       if ($pid != 0 && $uid != 0) { # then we can accept it:
-        $remotepeerid = $uid;
+        $clientid = $uid;
       }
+      # FIXME: can we get the socket inode as well this way?
     }
 
     # another option in Linux would be to parse the contents of
     # /proc/net/tcp to find the uid of the peer process based on that
     # information.
-    if (! defined $remotepeerid) {
+    if (! defined $clientid) {
+      msvalog('verbose', "SO_PEERCRED failed, digging around in /proc/net/tcp\n");
       my $proto;
       if ($family == AF_INET) {
         $proto = '';
@@ -238,7 +282,7 @@
           undef $proto;
         }
         if (defined $proto) {
-          my ($port, $iaddr) = unpack_sockaddr_in($remotepeer);
+          my ($port, $iaddr) = unpack_sockaddr_in($client);
           my $iaddrstring = unpack("H*", reverse($iaddr));
           msvalog('verbose', "Port: %04x\nAddr: %s\n", $port, $iaddrstring);
           my $remmatch = lc(sprintf("%s:%04x", $iaddrstring, $port));
@@ -246,12 +290,13 @@
           my $f = new IO::File;
           if ( $f->open('< '.$infofile)) {
             my @header = split(/ +/, <$f>);
-            my ($localaddrix, $uidix);
+            my ($localaddrix, $uidix, $inodeix);
             my $ix = 0;
             my $skipcount = 0;
             while ($ix <= $#header) {
               $localaddrix = $ix - $skipcount if (lc($header[$ix]) eq 'local_address');
               $uidix = $ix - $skipcount if (lc($header[$ix]) eq 'uid');
+              $inodeix = $ix - $skipcount if (lc($header[$ix]) eq 'inode');
               $skipcount++ if (lc($header[$ix]) eq 'tx_queue') or (lc($header[$ix]) eq 'tr'); # these headers don't actually result in a new column during the data rows
               $ix++;
             }
@@ -261,20 +306,24 @@
             } elsif (!defined $uidix) {
               msvalog('info', "Could not find uid field in %s; unable to determine peer UID\n",
                       $infofile);
+            } elsif (!defined $inodeix) {
+              msvalog('info', "Could not find inode field in %s; unable to determine peer network socket inode\n",
+                      $infofile);
             } else {
               msvalog('debug', "local_address: %d; uid: %d\n", $localaddrix,$uidix);
               while (my @line = split(/ +/,<$f>)) {
                 if (lc($line[$localaddrix]) eq $remmatch) {
-                  if (defined $remotepeerid) {
-                    msvalog('error', "Warning! found more than one remote uid! (%s and %s\n", $remotepeerid, $line[$uidix]);
+                  if (defined $clientid) {
+                    msvalog('error', "Warning! found more than one remote uid! (%s and %s\n", $clientid, $line[$uidix]);
                   } else {
-                    $remotepeerid = $line[$uidix];
-                    msvalog('info', "remote peer is uid %d\n",
-                            $remotepeerid);
+                    $clientid = $line[$uidix];
+                    $remotesocketinode = $line[$inodeix];
+                    msvalog('info', "remote peer is uid %d (inode %d)\n",
+                            $clientid, $remotesocketinode);
                   }
                 }
               }
-            msvalog('error', "Warning! could not find peer information in %s.  Not verifying.\n", $infofile) unless defined $remotepeerid;
+            msvalog('error', "Warning! could not find peer information in %s.  Not verifying.\n", $infofile) unless defined $clientid;
             }
           } else { # FIXME: we couldn't read the file.  what should we
                    # do besides warning?
@@ -284,21 +333,23 @@
         }
       }
     }
-    return $remotepeerid;
+    return { 'uid' => $clientid,
+             'inode' => $remotesocketinode };
   }
 
   sub handle_request {
     my $self = shift;
     my $cgi  = shift;
 
-    my $remotepeerid =  get_remote_peer_id(select);
+    my $clientinfo = get_client_info(select);
+    my $clientuid = $clientinfo->{uid};
 
-    if (defined $remotepeerid) {
+    if (defined $clientuid) {
       # test that this is an allowed user:
-      if (exists $self->{allowed_uids}->{$remotepeerid}) {
-        msvalog('verbose', "Allowing access from uid %d (%s)\n", $remotepeerid, $self->{allowed_uids}->{$remotepeerid});
+      if (exists $self->{allowed_uids}->{$clientuid}) {
+        msvalog('verbose', "Allowing access from uid %d (%s)\n", $clientuid, $self->{allowed_uids}->{$clientuid});
       } else {
-        msvalog('error', "MSVA client connection from uid %d, forbidden.\n", $remotepeerid);
+        msvalog('error', "MSVA client connection from uid %d, forbidden.\n", $clientuid);
         printf("HTTP/1.0 403 Forbidden -- peer does not match local user ID\r\nContent-Type: text/plain\r\nDate: %s\r\n\r\nHTTP/1.1 403 Not Found -- peer does not match the local user ID.  Are you sure the agent is running as the same user?\r\n",
                strftime("%a, %d %b %Y %H:%M:%S %z", localtime(time())),);
         return;
@@ -328,7 +379,7 @@
           }
         };
 
-        my ($status, $object) = $handler->{handler}($data);
+        my ($status, $object) = $handler->{handler}($data, $clientinfo);
         my $ret = to_json($object);
         msvalog('info', "returning: %s\n", $ret);
         printf("HTTP/1.0 %s\r\nDate: %s\r\nContent-Type: application/json\r\n\r\n%s",
@@ -389,7 +440,7 @@
       msvalog('error', "Not a valid keyserver (from MSVA_KEYSERVER):\n  %s\n", $ENV{MSVA_KEYSERVER});
     }
 
-    # FIXME: some msva.conf file (system and user?)
+    # FIXME: some msva.conf or monkeysphere.conf file (system and user?)
 
     # or else read from the relevant gnupg.conf:
     my $gpghome;
@@ -450,6 +501,7 @@
 
   sub reviewcert {
     my $data  = shift;
+    my $clientinfo  = shift;
     return if !ref $data;
 
     my $status = '200 OK';
@@ -543,7 +595,8 @@
 
           my $resp = Crypt::Monkeysphere::MSVA::MarginalUI->ask_the_user($gnupg,
                                                                          $uid,
-                                                                         \@subvalid_key_fprs);
+                                                                         \@subvalid_key_fprs,
+                                                                         getpidswithsocketinode($clientinfo->{inode}));
           msvalog('info', "response: %s\n", $resp);
           if ($resp) {
             $ret->{valid} = JSON::true;
