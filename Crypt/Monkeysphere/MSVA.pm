@@ -115,7 +115,8 @@
     my $class = shift;
 
     my $port = 0;
-    if (exists $ENV{MSVA_PORT}) {
+    if (exists $ENV{MSVA_PORT} and $ENV{MSVA_PORT} ne '') {
+      msvalog('debug', "MSVA_PORT set to %s\n", $ENV{MSVA_PORT});
       $port = $ENV{MSVA_PORT} + 0;
       die sprintf("not a reasonable port %d", $port) if (($port >= 65536) || $port <= 0);
     }
