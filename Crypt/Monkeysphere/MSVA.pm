@@ -649,13 +649,13 @@
 
     my $socketcount = @{ $server->{server}->{sock} };
     if ( $socketcount != 1 ) {
-      msvalog('error', "%d sockets open; should have been 1.", $socketcount);
+      msvalog('error', "%d sockets open; should have been 1.\n", $socketcount);
       $server->set_exit_status(10);
       $server->server_close();
     }
     my $port = @{ $server->{server}->{sock} }[0]->sockport();
     if ((! defined $port) || ($port < 1) || ($port >= 65536)) {
-      msvalog('error', "got nonsense port: %d.", $port);
+      msvalog('error', "got nonsense port: %d.\n", $port);
       $server->set_exit_status(11);
       $server->server_close();
     }
