@@ -593,14 +593,18 @@
             }
           }
 
-          my $resp = Crypt::Monkeysphere::MSVA::MarginalUI->ask_the_user($gnupg,
-                                                                         $uid,
-                                                                         \@subvalid_key_fprs,
-                                                                         getpidswithsocketinode($clientinfo->{inode}));
-          msvalog('info', "response: %s\n", $resp);
-          if ($resp) {
-            $ret->{valid} = JSON::true;
-            $ret->{message} = sprintf('Manually validated "%s" through the OpenPGP Web of Trust.', $uid);
+          # only show the marginal UI if the UID of the corresponding
+          # key is not fully valid.
+          if (!$foundvalid) {
+            my $resp = Crypt::Monkeysphere::MSVA::MarginalUI->ask_the_user($gnupg,
+                                                                           $uid,
+                                                                           \@subvalid_key_fprs,
+                                                                           getpidswithsocketinode($clientinfo->{inode}));
+            msvalog('info', "response: %s\n", $resp);
+            if ($resp) {
+              $ret->{valid} = JSON::true;
+              $ret->{message} = sprintf('Manually validated "%s" through the OpenPGP Web of Trust.', $uid);
+            }
           }
         }
       } else {
