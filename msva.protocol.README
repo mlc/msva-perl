@@ -14,7 +14,8 @@ GET /  -- initial contact query, protocol version compatibility.
   (returns: protoversion, server, available)
 
 POST /reviewcert  -- request validation of a certificate
- (query parameters: uid, context, pkc)
+ (required query parameters: uid, context, pkc)
+ (optional query parameters: keyserverpolicy)
  (returns: valid, message)
 
 Query parameters are posted as a JSON blob (*not* as
@@ -23,9 +24,9 @@ www-form-encoded).
 The variables that are returned are application/json as well.
 
 (PKC means: public key carrier: raw key, OpenPGP cert, or X.509 cert)
-(UID means: User ID (like in OpenPGP))
+(UID means: User ID (similar to OpenPGP))
 (context means: (this is too vague right now) something like "this certificate was used to try to identify an HTTPS server")
-
+(keyserverpolicy is optional; it states an advisory preference for how/whether the agent should contact the keyserver network for information about the key.  The options are `always`, `never`, and `unlessvalid` (see the `msva-perl(1)` man page section about the `KEYSERVER_POLICY` environment variable for more details). Be aware that the agent may disregard, override, or simply not implement this preference.)
 
 Full details on the Monkeysphere Validation Agent protocol should be
 available at http://web.monkeysphere.info/validation-agent/protocol

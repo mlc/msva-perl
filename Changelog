@@ -1,3 +1,10 @@
+msva-perl (0.6~pre) unstable; urgency=low
+
+  * add new element to JSON syntax allowing request to override
+    keyserver_policy (closes MS #2542)
+
+ -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Thu, 14 Oct 2010 16:30:54 -0400
+
 msva-perl (0.5) unstable; urgency=low
 
   * If ${MSVA_KEYSERVER} is unset or blank, default to using keyserver

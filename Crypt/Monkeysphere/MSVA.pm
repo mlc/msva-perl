@@ -543,13 +543,21 @@
         } else {
           $ret->{message} = sprintf('Failed to validate "%s" through the OpenPGP Web of Trust.', $uid);
           my $lastloop = 0;
-          msvalog('debug', "keyserver policy: %s\n", get_keyserver_policy);
+          my $kspolicy;
+          if (defined $data->{keyserverpolicy} &&
+              $data->{keyserverpolicy} =~ /^(always|never|unlessvalid)$/) {
+            $kspolicy = $1;
+            msvalog("verbose", "using requested keyserver policy: %s\n", $1);
+          } else {
+            $kspolicy = get_keyserver_policy();
+          }
+          msvalog('debug', "keyserver policy: %s\n", $kspolicy);
           # needed because $gnupg spawns child processes
           $ENV{PATH} = '/usr/local/bin:/usr/bin:/bin';
-          if (get_keyserver_policy() eq 'always') {
+          if ($kspolicy eq 'always') {
             fetch_uid_from_keyserver($uid);
             $lastloop = 1;
-          } elsif (get_keyserver_policy() eq 'never') {
+          } elsif ($kspolicy eq 'never') {
             $lastloop = 1;
           }
           my $foundvalid = 0;
