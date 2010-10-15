@@ -655,6 +655,8 @@
     my $self = shift;
     my $server = shift;
 
+    $server->{server}->{leave_children_open_on_hup} = 1;
+
     my $socketcount = @{ $server->{server}->{sock} };
     if ( $socketcount != 1 ) {
       msvalog('error', "%d sockets open; should have been 1.\n", $socketcount);
