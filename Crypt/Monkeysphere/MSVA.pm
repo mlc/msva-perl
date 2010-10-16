@@ -23,7 +23,7 @@
     use Exporter   ();
     our (@EXPORT_OK,@ISA);
     @ISA = qw(Exporter);
-    @EXPORT_OK = qw( &msvalog );
+    @EXPORT_OK = qw( &msvalog &reviewcert );
   }
   our @EXPORT_OK;
 
@@ -505,6 +505,8 @@
     my $clientinfo  = shift;
     return if !ref $data;
 
+    msvalog('verbose', "reviewing data...\n");
+
     my $status = '200 OK';
     my $ret =  { valid => JSON::false,
                  message => 'Unknown failure',
@@ -516,9 +518,12 @@
         $ret->{message} = sprintf('invalid peer/context');
         return $status, $ret;
     }
+    msvalog('verbose', "context: %s\n", $data->{context});
+    msvalog('verbose', "peer: %s\n", $data->{peer});
 
     my $rawdata = join('', map(chr, @{$data->{pkc}->{data}}));
     my $cert = Crypt::X509->new(cert => $rawdata);
+
     msvalog('verbose', "cert subject: %s\n", $cert->subject_cn());
     msvalog('verbose', "cert issuer: %s\n", $cert->issuer_cn());
     msvalog('verbose', "cert pubkey algo: %s\n", $cert->PubKeyAlg());

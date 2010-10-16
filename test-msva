@@ -1,7 +1,7 @@
 #!/bin/sh
 
-# this script exists so that you can launch the msva-perl directly
-# from your development environment without having to install
+# this script exists so that you can launch the msva perl scripts
+# directly from your development environment without having to install
 # anything.
 
 # it appears to be necessary because of some weirdness in how
@@ -12,5 +12,6 @@
 # Date: 2010-03-11 14:53:07-0500
 
 dir=$(dirname "$0")
-exec perl -wT -I"$dir" "$dir"/msva-perl "$@"
-
+cmd="$1"
+shift
+exec perl -wT -I"$dir" "$dir"/"$cmd" "$@"

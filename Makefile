@@ -1,6 +1,6 @@
 #!/usr/bin/make -f
 
-# Makefile for xul-ext-monkeysphere
+# Makefile for msva-perl
 
 # © 2010 Daniel Kahn Gillmor <dkg@fifthhorseman.net>
 # Licensed under GPL v3 or later
@@ -8,13 +8,19 @@
 VERSION=`dpkg-parsechangelog -lChangelog | grep ^Version: | cut -f2 -d\ `
 DEBIAN_VERSION=`dpkg-parsechangelog | grep ^Version: | cut -f2 -d\ `
 
-all: msva-perl.1
+all: msva-perl.1 msva-query-agent.1 msva-review-cert.1
 
 msva-perl.1: msva-perl
 	pod2man msva-perl msva-perl.1
 
+msva-query-agent.1: msva-query-agent
+	pod2man msva-query-agent msva-query-agent.1
+
+msva-review-cert.1: msva-review-cert
+	pod2man msva-review-cert msva-review-cert.1
+
 clean: 
-	rm -f msva-perl.1
+	rm -f msva-perl.1 msva-query-agent.1 msva-review-cert.1
 
 debian-package:
 	git buildpackage -uc -us
