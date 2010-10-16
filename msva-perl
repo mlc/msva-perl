@@ -56,9 +56,6 @@ The validation agent then tells the client whether it was able to
 successfully validate the peer's use of the public key in the given
 context.
 
-msva-perl relies on monkeysphere(1), which uses the user's OpenPGP web
-of trust to validate the peer's use of public keys.
-
 =head1 USAGE
 
 Launched with no arguments, msva-perl simply runs and listens forever.
